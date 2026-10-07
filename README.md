@@ -1,4 +1,4 @@
-# Photon64
+![Photon64 — a Nintendo 64 emulator for the browser](assets/banner.png)
 
 A Nintendo 64 emulator that runs entirely in the browser: a C core compiled to
 WebAssembly, a WebGPU renderer with an exact software fallback, shipped as one
