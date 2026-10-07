@@ -35,6 +35,7 @@
 - `tools/games.sh [sm64|ge|pd|mk64 ...]` — full regression suite; resolves each short name from `roms/` (a `<short>.z64` file at the root overrides the library copy). Skips missing ROMs.
 - `tools/games.sh --check-roms [...]` — report resolved ROM paths without running tests; exits nonzero if any requested ROM is missing. Run this first when the suite skips games.
 - `node tools/dawntest.mjs ...` / `node tools/gputest.mjs ...` — WebGPU-vs-software harnesses backing `games.sh` (`<rom> <frames> "<checks>" "[inputs]"`); the suite auto-selects Dawn bindings when present, else headless Chromium (`GPU_RUNNER=dawn|browser` forces one). `tools/*.py` summarize and diff the logs.
+- Browser harnesses (`apptest`, `gputest`, `games.sh` GPU steps) must run outside the agent sandbox — Chromium segfaults under it regardless of launch flags. Run them with a one-shot unsandboxed shell (`require_escalated`, batch everything into one command) or in your own terminal.
 - `.venv/bin/python tools/cmp_ref.py testroms [frames] [out-prefix]` — run the krom RSP test ROMs in `out/native` and compare green/red counts against the shipped reference screenshots.
 - `./out/rsptest` — RSP vector-op unit tests (VMACQ/VRSQ/VRCP/VMOV edge semantics); built and run by `tools/build_native.sh`.
 - `./out/bustest` — JoyBus PIF-packet bounds tests (short tx/rx must raise the channel error bit, never overrun the slot); built and run by `tools/build_native.sh`.
