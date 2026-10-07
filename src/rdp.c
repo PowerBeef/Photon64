@@ -117,7 +117,7 @@ static void span_setup(const TriSetup *s, int y, u32 *out) {
   int flip = s->flags & SETUP_FLIP;
   // attribute interpolation base
   s32 dy = y - (s->yh >> 2);
-  s32 xhb = s->xh + dy * (s32)((u32)s->dxhdy << 2);
+  s32 xhb = (s32)(s->xh + (s64)dy * (s64)(s32)((u32)s->dxhdy << 2));  // s64: the product can overflow 32 bits
   if (s->flags & SETUP_DO_OFFSET) xhb += 3 * s->dxhdy;
   s32 base_x = xhb >> 15;
   s32 xfrac = (s->flags & SETUP_SKIP_XFRAC) ? 0 : ((xhb >> 7) & 0xFF);
@@ -780,9 +780,9 @@ void rdp_process(void) {
   if (rdp.cmd_n + n > 0x10000) n = 0x10000 - rdp.cmd_n;
   for (u32 i = 0; i < n; i++) {
     u32 a = cur + i * 4;
-    rdp.cmd[rdp.cmd_n++] = (sys.dp_status & 1) ? *(u32 *)(spmem + (a & 0xFFC)) : (a < sys.rdram_size ? RDRAM32(a) : 0);
+    rdp.cmd[rdp.cmd_n++] = (sys.dp_status & 1) ? *(u32 *)(spmem + (a & 0x1FFC)) : (a < sys.rdram_size ? RDRAM32(a) : 0);
   }
-  sys.dp_current = end;
+  sys.dp_current = cur + n * 4;  // (== end unless the FIFO clamp dropped the tail, which stays queued for next time)
   if (!rdp_paused) rdp_exec_buffered();      // (while stopped, new commands just queue up behind the load)
   if (rdp_hook_post) rdp_hook_post();
 }

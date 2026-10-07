@@ -83,6 +83,7 @@ static int tlb_lookup(u32 va, int write, u32 *pa) {
 // Exceptions / interrupts
 // ---------------------------------------------------------------------------
 static void exc_enter(u32 code, u32 ce, u32 vec_off) {
+  cpu.llbit = 0;  // an exception between LL and SC breaks the link, like ERET does
   u32 st = cpu.cp0[C0_STATUS];
   u32 cause = (cpu.cp0[C0_CAUSE] & 0x0000FF00) | (code << 2) | (ce << 28);
   if (!(st & ST_EXL)) {
@@ -677,10 +678,10 @@ void cpu_run(void) {
         switch (op & 0x3F) {
           case 0x00: R[RDI] = (s64)(s32)((u32)R[RTI] << SAI); break;                       // SLL
           case 0x02: R[RDI] = (s64)(s32)((u32)R[RTI] >> SAI); break;                       // SRL
-          case 0x03: R[RDI] = (s64)(s32)(R[RTI] >> SAI); break;                            // SRA (uses 64-bit source)
+          case 0x03: R[RDI] = (s64)(s32)(((s32)R[RTI]) >> SAI); break;                      // SRA
           case 0x04: R[RDI] = (s64)(s32)((u32)R[RTI] << (R[RSI] & 31)); break;             // SLLV
           case 0x06: R[RDI] = (s64)(s32)((u32)R[RTI] >> (R[RSI] & 31)); break;             // SRLV
-          case 0x07: R[RDI] = (s64)(s32)(R[RTI] >> (R[RSI] & 31)); break;                  // SRAV
+          case 0x07: R[RDI] = (s64)(s32)(((s32)R[RTI]) >> (R[RSI] & 31)); break;            // SRAV
           case 0x08: cpu.npc = (u32)R[RSI]; cpu.branch = 1; break;                         // JR
           case 0x09: { u32 t = (u32)R[RSI]; R[RDI] = (s64)(s32)(pc + 8); cpu.npc = t; cpu.branch = 1; break; } // JALR
           case 0x10: R[RDI] = cpu.hi; break;
