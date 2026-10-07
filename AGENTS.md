@@ -37,6 +37,7 @@
 - `node tools/dawntest.mjs ...` / `node tools/gputest.mjs ...` — WebGPU-vs-software harnesses backing `games.sh` (`<rom> <frames> "<checks>" "[inputs]"`); the suite auto-selects Dawn bindings when present, else headless Chromium (`GPU_RUNNER=dawn|browser` forces one). `tools/*.py` summarize and diff the logs.
 - `.venv/bin/python tools/cmp_ref.py testroms [frames] [out-prefix]` — run the krom RSP test ROMs in `out/native` and compare green/red counts against the shipped reference screenshots.
 - `./out/rsptest` — RSP vector-op unit tests (VMACQ/VRSQ/VRCP/VMOV edge semantics); built and run by `tools/build_native.sh`.
+- `./out/bustest` — JoyBus PIF-packet bounds tests (short tx/rx must raise the channel error bit, never overrun the slot); built and run by `tools/build_native.sh`.
 
 ## ROMs
 

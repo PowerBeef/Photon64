@@ -10,6 +10,8 @@ $CC -O3 -o out/native tools/native.c
 ls -la out/native
 $CC -O2 -o out/rsptest tools/rsptest.c
 ./out/rsptest
+$CC -O2 -o out/bustest tools/bustest.c
+./out/bustest
 REF=../ref/angrylion-rdp-plus
 if [ ! -f $REF/src/core/n64video.c ]; then
   echo "note: $REF not present, skipping out/oracle_nn (clone ata4/angrylion-rdp-plus next to the repo root)" >&2

@@ -260,6 +260,7 @@ static void joybus(int ch, u32 tx, u32 rx, u8 *cmd, u8 *res, u8 *rxp) {
         break;
       }
       case 0x02: {
+        if (tx < 3 || rx < 33) { *rxp |= 0x80; break; }  // address + 32B payload + crc must fit
         u32 addr = ((cmd[1] << 8) | cmd[2]) & 0xFFE0;
         if (sys.pak[ch] == 1 && addr < 0x8000) memcpy(res, mempak[ch] + addr, 32);
         else memset(res, (sys.pak[ch] == 2 && addr == 0x8000) ? 0x80 : 0, 32);
@@ -268,6 +269,7 @@ static void joybus(int ch, u32 tx, u32 rx, u8 *cmd, u8 *res, u8 *rxp) {
         break;
       }
       case 0x03: {
+        if (tx < 35 || rx < 1) { *rxp |= 0x80; break; }  // address + 32B payload in, crc ack out
         u32 addr = ((cmd[1] << 8) | cmd[2]) & 0xFFE0;
         if (sys.pak[ch] == 1 && addr < 0x8000) { memcpy(mempak[ch] + addr, cmd + 3, 32); sys.save_dirty = 1; }
         else if (sys.pak[ch] == 2 && addr == 0xC000) sys.rumble[ch] = cmd[3] & 1;
@@ -287,8 +289,12 @@ static void joybus(int ch, u32 tx, u32 rx, u8 *cmd, u8 *res, u8 *rxp) {
         if (rx > 1) res[1] = sys.save_type == SAVE_EEP16K ? 0xC0 : 0x80;
         if (rx > 2) res[2] = 0x00;
         break;
-      case 0x04: memcpy(res, eeprom + (cmd[1] % blocks) * 8, 8); break;
-      case 0x05: memcpy(eeprom + (cmd[1] % blocks) * 8, cmd + 1 + 1, 8); res[0] = 0; sys.save_dirty = 1; break;
+      case 0x04:
+        if (tx < 2 || rx < 8) { *rxp |= 0x80; break; }
+        memcpy(res, eeprom + (cmd[1] % blocks) * 8, 8); break;
+      case 0x05:
+        if (tx < 10 || rx < 1) { *rxp |= 0x80; break; }
+        memcpy(eeprom + (cmd[1] % blocks) * 8, cmd + 1 + 1, 8); res[0] = 0; sys.save_dirty = 1; break;
       default: *rxp |= 0x80; break;
     }
     return;
