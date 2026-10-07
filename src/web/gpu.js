@@ -336,7 +336,7 @@ class N64Gpu {
     ex.n64_vi_decode();
     const u32 = new Uint32Array(this.mem.buffer), i32 = new Int32Array(this.mem.buffer), vs = this.p.vi_state >> 2;
     const status = u32[vs], origin = u32[vs + 1], width = u32[vs + 2], maxX = i32[vs + 13], maxY = i32[vs + 14];
-    const serrate = u32[vs + 15], outH = u32[vs + 17], valid = u32[vs + 18];
+    const serrate = u32[vs + 15], outH = Math.min(u32[vs + 17], OUT_H), valid = u32[vs + 18];  // (the scale texture is OUT_H tall)
     const W = maxX + 2, H = maxY + 2;
     if (valid) {
       if ((status & 3) === 3) this.syncRange(((origin >> 2) - width - 3) * 2, ((H + 2) * width + 6) * 2);
@@ -407,7 +407,7 @@ class N64Gpu {
     return out;
   }
   readFb(idx, count) { return this.readBuf(this.fbBuf, idx * 4, count * 4); }
-  readHd(idx, count) { const n = this.hd.S * this.hd.S; return this.readBuf(this.hd.target, (idx & (this.hdWords - 1)) * 4 * n, count * 4 * n); }
+  readHd(idx, count) { const set = this.hd; if (!set) throw new Error('readHd needs an HD set (call setScale first)'); const n = set.S * set.S; return this.readBuf(set.target, (idx & (this.hdWords - 1)) * 4 * n, count * 4 * n); }
   async readOutput() {
     const set = this.hd || this.native, S = set.S, h = (this.outH || 240) * S, w = OUT_W * S;
     const sb = this.device.createBuffer({ size: w * 4 * h, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
