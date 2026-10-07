@@ -14,7 +14,7 @@
 
 ## Setup (macOS, one time)
 
-- `brew install llvm` — Apple clang cannot link wasm32; `build_wasm.sh` picks Homebrew LLVM automatically (`CC` or `WASI_SDK_PATH` override).
+- `brew install llvm lld` — Apple clang cannot link wasm32 and Homebrew LLVM ships without a linker; `build_wasm.sh` picks Homebrew LLVM automatically and fails with a clear error if `wasm-ld` is missing (`CC` or `WASI_SDK_PATH` override).
 - `npm i playwright && npx playwright install chromium` — run from the repo root; installs the `playwright` package locally and the browsers to `~/Library/Caches/ms-playwright`. Ignore the "install dependencies first" warning if it appears — it only means the command ran outside the repo.
 - `python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt` — Pillow/numpy/scipy for the image-diff scripts; `games.sh` uses the venv automatically.
 - Clone `ata4/angrylion-rdp-plus` to `../ref/angrylion-rdp-plus` (next to the repo root) to enable the `out/oracle_nn` differential step.
@@ -32,6 +32,7 @@
 - `tools/games.sh --check-roms [...]` — report resolved ROM paths without running tests; exits nonzero if any requested ROM is missing. Run this first when the suite skips games.
 - `node tools/dawntest.mjs ...` / `node tools/gputest.mjs ...` — WebGPU-vs-software harnesses backing `games.sh` (`<rom> <frames> "<checks>" "[inputs]"`); the suite auto-selects Dawn bindings when present, else headless Chromium (`GPU_RUNNER=dawn|browser` forces one). `tools/*.py` summarize and diff the logs.
 - `.venv/bin/python tools/cmp_ref.py testroms [frames] [out-prefix]` — run the krom RSP test ROMs in `out/native` and compare green/red counts against the shipped reference screenshots.
+- `./out/rsptest` — RSP vector-op unit tests (VMACQ/VRSQ/VRCP/VMOV edge semantics); built and run by `tools/build_native.sh`.
 
 ## ROMs
 

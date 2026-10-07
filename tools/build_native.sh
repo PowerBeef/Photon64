@@ -8,6 +8,8 @@ mkdir -p out
 CC=${CC:-cc}
 $CC -O3 -o out/native tools/native.c
 ls -la out/native
+$CC -O2 -o out/rsptest tools/rsptest.c
+./out/rsptest
 REF=../ref/angrylion-rdp-plus
 if [ ! -f $REF/src/core/n64video.c ]; then
   echo "note: $REF not present, skipping out/oracle_nn (clone ata4/angrylion-rdp-plus next to the repo root)" >&2
