@@ -12,6 +12,10 @@
 
 - Use `import ... from ...` syntax in `.mjs` files.
 
+## Workflow
+
+- Work from the `main` branch only; never create feature branches.
+
 ## Setup (macOS, one time)
 
 - `brew install llvm lld` — Apple clang cannot link wasm32 and Homebrew LLVM ships without a linker; `build_wasm.sh` picks Homebrew LLVM automatically and fails with a clear error if `wasm-ld` is missing (`CC` or `WASI_SDK_PATH` override).
