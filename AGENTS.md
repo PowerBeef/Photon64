@@ -4,7 +4,7 @@
 - `src/` — C core (`n64.c` plus cpu/rsp/rdp/vi/bus/api/gpu) and `src/web/` frontend (`app.html` template, `app.js`/`gpu.js`/`pad.js`/`art.js`, `*.wgsl` shaders)
 - `tools/` — `build.mjs` bundler, Node/Python test harnesses, and `tools/inputs/` recorded input scripts (`sm64|ge|pd|mk64.txt`)
 - `roms/` — local ROM library for manual and regression testing (not source); see `## ROMs` for the file mapping
-- `build_wasm.sh`, `photon64.html` — WASM build script and distributable single-file app at the repo root (`out/` holds intermediate build outputs)
+- `build_wasm.sh` — WASM build script; `out/photon64.html` is the canonical single-file app bundle (no root copy is kept)
 - `node_modules/`, `.venv/` — generated: local Playwright install and Python venv (see `## Setup`; never edit by hand)
 - `testroms/` — krom RSP test ROMs (`.N64`) plus shipped reference screenshots (`.png`); see `## Validation`
 

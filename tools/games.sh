@@ -10,6 +10,7 @@
 #   tools/games.sh --check-roms [sm64|ge|pd|mk64 ...]   # report resolved ROM paths only
 #   GPU_RUNNER=dawn|browser forces one; DAWN_WEBGPU points at the bindings.
 cd "$(dirname "$0")/.." || exit 1
+set -o pipefail
 DAWN_WEBGPU=${DAWN_WEBGPU:-/home/claude/dawn/node_modules/webgpu/index.js}
 export DAWN_WEBGPU
 GPU_RUNNER=${GPU_RUNNER:-auto}
@@ -48,7 +49,12 @@ for g in ${@:-sm64 ge pd mk64}; do
   rom=$(rom_for "$g") || { echo "$g: ROM not present, skipped"; continue; }
   I=$(cat tools/inputs/$g.txt); n=$(frames_for $g)
   echo "== $g: software renderer vs. reference"
-  ./out/oracle_nn "$rom" $n -i "$I" | tail -2
+  if [ -x ./out/oracle_nn ]; then
+    ./out/oracle_nn "$rom" $n -i "$I" | tail -2
+    [ "${PIPESTATUS[0]}" -eq 0 ] || { echo "$g: oracle step failed"; fail=1; }
+  else
+    echo "$g: out/oracle_nn not built, reference step failed (run tools/build_native.sh with the Angrylion checkout present)"; fail=1
+  fi
   for mode in "" "--hd 0"; do
     echo "== $g: WebGPU vs. software via $GPU_RUNNER${mode:+, high-resolution path at 1x}"
     node tools/$runner "$rom" $n "$(checks_for $g)" "$I" $mode > out/games_$g.log 2>&1

@@ -2,8 +2,12 @@
 // on Mesa lavapipe (GPU_BACKEND=lvp, default) or whatever Vulkan driver is installed.
 //   node tools/dawntest.mjs rom frames "check,frames" [inputs] [--images prefix] [--hd L] [--window n] [--list file] [--stripped]
 import fs from 'fs'; import path from 'path'; import zlib from 'zlib'; import vm from 'vm'; import { fileURLToPath } from 'url';
-if ((process.env.GPU_BACKEND || 'lvp') === 'lvp') process.env.VK_ICD_FILENAMES = process.env.VK_DRIVER_FILES = '/usr/share/vulkan/icd.d/lvp_icd.json';
+if ((process.env.GPU_BACKEND || 'lvp') === 'lvp' && !process.env.VK_ICD_FILENAMES) {
+  if (process.platform !== 'linux') { console.error('error: dawntest defaults to GPU_BACKEND=lvp (Linux lavapipe); on this host set GPU_BACKEND/VK_ICD_FILENAMES explicitly or use gputest.mjs'); process.exit(1); }
+  process.env.VK_ICD_FILENAMES = process.env.VK_DRIVER_FILES = process.env.LVP_ICD || '/usr/share/vulkan/icd.d/lvp_icd.json';
+}
 const dawnBindings = process.env.DAWN_WEBGPU || '/home/claude/dawn/node_modules/webgpu/index.js';
+if (!fs.existsSync(dawnBindings)) { console.error(`error: Dawn bindings not found at ${dawnBindings} (set DAWN_WEBGPU=... or use gputest.mjs)`); process.exit(1); }
 const { create, globals } = await import(dawnBindings);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);

@@ -473,7 +473,7 @@ addEventListener('keydown', e => {
   if (e.code === 'F4' && !e.repeat) { loadState(); e.preventDefault(); return; }
   if (Object.values(k).includes(e.code)) { keysDown.add(e.code); e.preventDefault(); audioStart(); }
 });
-addEventListener('keyup', e => { keysDown.delete(e.code); if (e.code === settings.keys.FF) { fastForward = false; audioReset(); } });
+addEventListener('keyup', e => { keysDown.delete(e.code); if (e.code === settings.keys.FF) { fastForward = false; if (!ffLock) audioReset(); } });
 addEventListener('blur', () => { keysDown.clear(); fastForward = false; });
 
 // ---- touch pad layout ----
@@ -797,7 +797,7 @@ function tick(now) {
     // (reads: how often per second the game looked at GPU-drawn memory; waits: how often that had to wait for the GPU)
     const gs = useGpu ? gpu.stats : { syncs: 0, waits: 0 }, rd = gs.syncs - perf.syncs0, wt = gs.waits - perf.waits0;
     perf.syncs0 = gs.syncs; perf.waits0 = gs.waits;
-    if (settings.hud) $('hud').textContent = `${perf.fps.toFixed(1)} fps  ${perf.ms.toFixed(2)} ms (peak ${perf.peak.toFixed(1)})  ${useGpu ? 'WebGPU' + (gpu.scaleLog2 ? ` ${1 << gpu.scaleLog2}×` : '') : 'software'}${rd > 0 ? `  reads ${rd} (${wt} waited)` : ''}${fastForward ? '  ▶▶' : ''}`;
+    if (settings.hud) $('hud').textContent = `${perf.fps.toFixed(1)} fps  ${perf.ms.toFixed(2)} ms (peak ${perf.peak.toFixed(1)})  ${useGpu ? 'WebGPU' + (gpu.scaleLog2 ? ` ${1 << gpu.scaleLog2}×` : '') : 'software'}${rd > 0 ? `  reads ${rd} (${wt} waited)` : ''}${(fastForward || ffLock) ? '  ▶▶' : ''}`;
     // GPU persistently unable to keep up? say so once
     if (useGpu && perf.stalls > 20 && perf.fps < hz * 0.8) { if (++perf.slow === 4) toast('The GPU is not keeping up — try the software renderer in Settings', 5000); } else if (perf.slow < 4) perf.slow = 0;
     perf.frames = 0; perf.emu = 0; perf.peak = 0; perf.stalls = 0; perf.t0 = now;
@@ -835,7 +835,7 @@ function toast(msg, ms = 1800) { const t = $('toast'); t.textContent = msg; t.cl
 // with a mouse the menu button fades away until the pointer moves
 function pokeMenu() { const b = $('b-menu'); b.classList.remove('idle'); clearTimeout(menuT); menuT = setTimeout(() => b.classList.add('idle'), 2600); }
 function updateFlag() {              // note at the top of the picture while the game is paused or fast-forwarding
-  const f = $('flag'), on = !!rom && !sheetOpen() && (paused || ffLock);
+  const f = $('flag'), on = !!rom && !sheetOpen() && (paused || fastForward || ffLock);
   f.hidden = !on;
   if (on) f.innerHTML = UiArt.icon(paused ? 'pause' : 'ff') + (paused ? 'Paused' : 'Fast forward');
 }

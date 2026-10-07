@@ -2,6 +2,7 @@
 # Build the core to WebAssembly (freestanding, SIMD128, bulk memory).
 # Needs a clang that can link wasm32 (Apple's cannot): Homebrew LLVM, wasi-sdk, or $CC.
 set -e
+cd "$(dirname "$0")" || exit 1
 if [ -z "$CC" ] && [ -n "$WASI_SDK_PATH" ]; then CC=$WASI_SDK_PATH/bin/clang; fi
 if [ -z "$CC" ]; then
   for c in /opt/homebrew/opt/llvm/bin/clang /usr/local/opt/llvm/bin/clang; do
