@@ -38,6 +38,7 @@
 - `.venv/bin/python tools/cmp_ref.py testroms [frames] [out-prefix]` — run the krom RSP test ROMs in `out/native` and compare green/red counts against the shipped reference screenshots.
 - `./out/rsptest` — RSP vector-op unit tests (VMACQ/VRSQ/VRCP/VMOV edge semantics); built and run by `tools/build_native.sh`.
 - `./out/bustest` — JoyBus PIF-packet bounds tests (short tx/rx must raise the channel error bit, never overrun the slot); built and run by `tools/build_native.sh`.
+- `node tools/jscheck.mjs` — Node checks over the shipped `src/web/app.js` (zip/ROM/state validation, cached memory views); no browser needed.
 
 ## ROMs
 

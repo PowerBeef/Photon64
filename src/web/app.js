@@ -33,8 +33,10 @@ async function initCore() {
   ex = instance.exports;
   hi = Array.from(new Uint32Array(ex.memory.buffer, ex.n64_host_info(), 24));
 }
-const u8v = () => new Uint8Array(ex.memory.buffer);
-const u32v = () => new Uint32Array(ex.memory.buffer);
+let _mbuf = null, _u8 = null, _u32 = null;   // cached memory views (a grown buffer detaches the old one)
+function _views() { const b = ex.memory.buffer; if (b !== _mbuf) { _mbuf = b; _u8 = new Uint8Array(b); _u32 = new Uint32Array(b); } }
+const u8v = () => { _views(); return _u8; };
+const u32v = () => { _views(); return _u32; };
 
 let gpuStarting = false;       // WebGPU pipelines are still being built (the game runs in software until they are ready)
 // A readable name for the graphics adapter. Browsers say little here on purpose: Safari on an iPhone gives the vendor
@@ -105,6 +107,8 @@ async function applyScale() {
 }
 
 // ---------------------------------------------------------------------------------------------- ROM
+const MAX_ROM = 64 * 1024 * 1024;   // biggest licensed N64 cartridge: 512 Mbit
+function checkRomSize(n) { if (n > MAX_ROM) throw new Error('That file is too large to be an N64 ROM'); }
 async function unzip(u8) {
   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
   let e = u8.length - 22;
@@ -121,11 +125,19 @@ async function unzip(u8) {
     p += 46 + nl + xl + cl;
   }
   if (!best) throw new Error('No ROM found inside the zip');
-  const lo = best.off, start = lo + 30 + dv.getUint16(lo + 26, true) + dv.getUint16(lo + 28, true);
+  if (best.usize > MAX_ROM) throw new Error('That ROM is too large');
+  const lo = best.off;
+  if (lo > u8.length - 30) throw new Error('That zip file is truncated');
+  const start = lo + 30 + dv.getUint16(lo + 26, true) + dv.getUint16(lo + 28, true);
+  if (start > u8.length || best.csize > u8.length - start) throw new Error('That zip file is truncated');
   const data = u8.subarray(start, start + best.csize);
-  if (best.method === 0) return { data: data.slice(), name: best.name };
+  if (best.method === 0) {
+    if (data.length !== best.usize) throw new Error('That zip file is corrupt');
+    return { data: data.slice(), name: best.name };
+  }
   if (best.method !== 8 || !self.DecompressionStream) throw new Error('Unsupported zip compression');
   const out = await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
+  if (out.byteLength !== best.usize) throw new Error('That zip file is corrupt');
   return { data: new Uint8Array(out), name: best.name };
 }
 
@@ -138,6 +150,7 @@ async function openFile(file) {
 }
 
 async function loadRom(data, fileName, fromLibrary) {
+  checkRomSize(data.length);
   running = false; romGen++;
   if (busy) await busy;
   await flushSaves();
@@ -271,7 +284,11 @@ async function gz(u8, dir) {
 }
 const SLOTS = 4;
 const stateKey = slot => 'state:' + rom.key + (slot ? ':' + slot : '');
-async function stateMeta() { const m = (rom && await idbGet('smeta:' + rom.key)) || []; if (!m[0] && rom && await idbGet(stateKey(0))) m[0] = { t: 0, thumb: '' }; return m; }
+async function stateMeta() {
+  const m = (rom && await idbGet('smeta:' + rom.key)) || [];
+  if (rom) for (let s = 0; s < SLOTS; s++) if (!m[s] && await idbGet(stateKey(s))) m[s] = { t: 0, thumb: '' };
+  return m;
+}
 async function saveState(slot = 0, thumb) {
   if (!rom || !self.CompressionStream) return toast('Save states are not supported in this browser');
   const was = running; running = false;
