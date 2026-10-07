@@ -1,0 +1,22 @@
+import path from 'path';
+import { chromium } from 'playwright';
+const browser = await chromium.launch({ args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-vulkan=swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist',
+  '--disable-vulkan-surface', '--enable-unsafe-swiftshader', '--disable-gpu-watchdog', '--autoplay-policy=no-user-gesture-required'] });
+const page = await (await browser.newContext({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true })).newPage();
+page.on('pageerror', e => console.log('[pageerror]', e.message));
+await page.goto('file://' + path.resolve('out/photon64.html') + '?gpu=force&insets=59,0,34,0');
+await page.setInputFiles('#file', process.argv[2]);
+await page.waitForFunction(() => window.__photon && window.__photon.useGpu, null, { timeout: 240000 });
+await page.waitForTimeout(+process.argv[4] || 30000);
+await page.tap('#b-menu'); await page.waitForTimeout(4000);
+console.log(await page.evaluate(() => ({ gpu: window.__photon.useGpu, thumb: document.getElementById('m-thumb').src.slice(0, 30), len: document.getElementById('m-thumb').src.length, sub: document.getElementById('m-sub').textContent })));
+await page.screenshot({ path: process.argv[3] + '_menu.png', timeout: 200000 });
+await page.tap('#m-save'); await page.tap('#slots .slot:nth-child(1)'); await page.waitForTimeout(5000);
+console.log('toast', await page.evaluate(() => document.getElementById('toast').textContent));
+await page.tap('#b-menu'); await page.waitForTimeout(1500); await page.tap('#m-load'); await page.waitForTimeout(800);
+await page.screenshot({ path: process.argv[3] + '_load.png', timeout: 200000 });
+await page.tap('#slots .slot:nth-child(1)'); await page.waitForTimeout(6000);
+console.log('toast', await page.evaluate(() => [document.getElementById('toast').textContent, window.__photon.useGpu]));
+await page.tap('#b-menu'); await page.waitForTimeout(1500); await page.tap('#m-home'); await page.waitForTimeout(1500);
+await page.screenshot({ path: process.argv[3] + '_lib.png', timeout: 200000 });
+await browser.close();

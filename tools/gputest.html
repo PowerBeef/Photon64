@@ -1,0 +1,222 @@
+<!doctype html><meta charset="utf-8"><title>gpu test</title>
+<canvas id="c" width="640" height="480"></canvas>
+<script src="/src/web/gpu.js"></script>
+<script>
+const BT = { A: 0x8000, B: 0x4000, Z: 0x2000, START: 0x1000, DU: 0x800, DD: 0x400, DL: 0x200, DR: 0x100, L: 0x20, R: 0x10, CU: 8, CD: 4, CL: 2, CR: 1 };
+const logs = [];
+async function mkCore(wasmBytes, rom, flush) {
+  let mem;
+  const { instance } = await WebAssembly.instantiate(wasmBytes, { env: {
+    host_log: (p, a, b) => { const u8 = new Uint8Array(mem.buffer, p, 64); let s = ''; for (const c of u8) { if (!c) break; s += String.fromCharCode(c); } logs.push(`${s} ${a} ${b}`); },
+    host_gpu_flush: () => flush(),
+  } });
+  const ex = instance.exports; mem = ex.memory;
+  const p = ex.n64_alloc(rom.length);
+  new Uint8Array(mem.buffer, p, rom.length).set(rom);
+  if (window.XPAK_MODE) ex.n64_config(10, window.XPAK_MODE);     // Expansion Pak: 1 installed, 2 removed (default: automatic)
+  if (!ex.n64_load(p, rom.length)) throw new Error('bad rom');
+  const hi = Array.from(new Uint32Array(mem.buffer, ex.n64_host_info(), 24));
+  return { ex, hi };
+}
+function b64(u8) { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); }
+
+window.runTest = async function (cfg) {
+  const t00 = performance.now();
+  const wasm = await (await fetch('/out/n64.wasm')).arrayBuffer();
+  const rom = new Uint8Array(await (await fetch(cfg.rom)).arrayBuffer());
+  const sh = {};
+  for (const n of ['rdp', 'vi', 'merge']) sh[n] = await (await fetch(`/src/web/${n}.wgsl`)).text();
+  if (cfg.stripped) Object.assign(sh, await (await fetch('/out/shaders.json')).json());
+  let gpu = null, lastBatch = null;
+  const A = await mkCore(wasm, rom.slice(), () => { const u = new Uint32Array(A.ex.memory.buffer, A.hi[6], 20); lastBatch = Array.from(u); gpu.flush(); });
+  const B = cfg.noref ? null : await mkCore(wasm, rom.slice(), () => {});
+  const tc = performance.now();
+  sh.allowFallback = true; if (cfg.hdWords) sh.hdWords = cfg.hdWords;
+  sh.allowFallback = true; gpu = await N64Gpu.create(A, cfg.canvas ? document.getElementById("c") : null, sh);
+  if (gpu) gpu.reset();
+  if (!gpu) return { error: 'no webgpu' };
+  if (cfg.noexact) gpu.setExact(false);
+  if (cfg.sharp) { A.ex.n64_config(9, 1); if (B) B.ex.n64_config(9, 1); }     // console video filters off (picture only)
+  if (cfg.hd !== undefined && cfg.hd !== null) {
+    await gpu.setScale(cfg.hd, cfg.hd === 0);
+    if (cfg.hd === 0) gpu.readFb = gpu.readHd;       // 1x "HD" path must reproduce the native pass exactly
+  }
+  const compileMs = performance.now() - tc;
+  const trace = []; let curFrame = 0;
+  if (cfg.trace) {   // event order of the last frames: batches, picture-complete hints, copy-backs asked for by the game
+    const f0 = gpu.flush.bind(gpu), s0 = gpu.syncNow.bind(gpu), p0 = gpu.present.bind(gpu), r0 = gpu.startReadback.bind(gpu);
+    const on = () => curFrame >= cfg.frames - cfg.trace;
+    gpu.flush = () => { if (on()) { const u = new Uint32Array(A.ex.memory.buffer); const bi = gpu.p.b_info >> 2; trace.push(u[gpu.p.hint >> 2] ? 'hint' : `batch@${u[bi + 3].toString(16)} n=${u[bi + 8]} z=${u[bi + 15]}`); } f0(); };
+    gpu.syncNow = async () => { if (on()) { const st = new Uint32Array(A.ex.memory.buffer, A.hi[21], 16); const c = new Uint32Array(A.ex.memory.buffer, st[8], 4); trace.push(`READ ${['?', 'cpu-load', 'cpu-store', 'rsp-dma', 'rdp-load'][c[0]]} addr=${c[1].toString(16)} ${c[0] === 4 ? 'len=' + c[2] + ' cmd=' + c[3].toString(16) : 'pc=' + c[2].toString(16)} touched=${gpu.touched.size} inflight=${gpu.inflight.length}`); } await s0(); };
+    gpu.present = x => { if (on()) trace.push(`--- field ${curFrame}`); p0(x); };
+    gpu.startReadback = () => { if (on() && gpu.touched.size) trace.push('  (copy-back started)'); r0(); };
+  }
+  const inputs = (cfg.inputs || '').split(',').filter(Boolean).map(s => { const [f, b, d] = s.split(':'); return { f: +f, b, d: +(d || 1) }; });
+  const res = { compileMs, checks: [], images: [], logs, trace };
+  const checks = new Set(cfg.checks || []);
+  let tA = 0, tB = 0, gpuOn = true;
+  for (let i = 0; i < cfg.frames; i++) {
+    curFrame = i;
+    let b = 0, sx = 0, sy = 0;
+    for (const e of inputs) if (i >= e.f && i < e.f + e.d) { for (const k of e.b.split('+')) { if (k.startsWith('X=')) sx = +k.slice(2); else if (k.startsWith('Y=')) sy = +k.slice(2); else b |= BT[k] || 0; } }
+    A.ex.n64_input(0, b, sx, sy);
+    // GPU rendering is only switched on around the frames that get checked (SwiftShader is slow)
+    const win = cfg.window || 0;
+    let near = !win;
+    if (win) for (const c of checks) if (i >= c - win && i <= c) near = true;
+    if (near && !gpuOn) { gpu.reset(); gpuOn = true; }
+    else if (!near && gpuOn) { A.ex.n64_config(6, 0); await gpu.syncToCpu(); A.ex.n64_config(0, 0); gpuOn = false; }
+    let t = performance.now();
+    while (A.ex.n64_frame()) await gpu.syncNow();      // (the game looked at GPU-drawn memory: copy it back, carry on)
+    if (gpuOn) gpu.present(!!cfg.canvas); else A.ex.n64_vi_decode();
+    tA += performance.now() - t;
+    if (cfg.progress && i % cfg.progress === 0) console.log('frame', i, 'gpu', gpuOn);
+    if (B) {
+      B.ex.n64_input(0, b, sx, sy);
+      t = performance.now();
+      B.ex.n64_frame();
+      tB += performance.now() - t;
+      if (checks.has(i) || checks.has(i + 1) || checks.has(i + 2)) B.ex.n64_vi_render(); else B.ex.n64_vi_decode();   // (two fields for interlaced modes)
+    }
+    if ((i & 15) === 15 || checks.has(i)) await gpu.device.queue.onSubmittedWorkDone();
+    if (checks.has(i)) {
+      A.ex.n64_config(6, 0); if (B) B.ex.n64_config(6, 0);     // bring both renderers to the same point
+      await gpu.device.queue.onSubmittedWorkDone();
+      const out = await gpu.readOutput();
+      const c = { frame: i, outH: out.height };
+      if (B) {
+        const bm = B.ex.memory.buffer, hb = B.hi;
+        // VI output compare
+        const ref = new Uint8Array(bm, hb[1], 640 * out.height * 4);
+        let viDiff = 0, viMax = 0;
+        for (let k = 0; k < ref.length; k += 4) {
+          const d = Math.max(Math.abs(ref[k] - out.data[k]), Math.abs(ref[k + 1] - out.data[k + 1]), Math.abs(ref[k + 2] - out.data[k + 2]));
+          if (d) { viDiff++; if (d > viMax) viMax = d; }
+        }
+        c.viDiff = viDiff; c.viMax = viMax;
+        if (viDiff) {
+          const list = [];
+          for (let k = 0; k < ref.length && list.length < 12; k += 4) if (ref[k] !== out.data[k] || ref[k + 1] !== out.data[k + 1] || ref[k + 2] !== out.data[k + 2])
+            list.push([(k >> 2) % 640, ((k >> 2) / 640) | 0, [ref[k], ref[k + 1], ref[k + 2]], [out.data[k], out.data[k + 1], out.data[k + 2]]]);
+          c.extra = { vi: list };
+          // displayed framebuffer compare
+          const vs = new Uint32Array(bm, hb[2], 20), origin = vs[1], width = vs[2];
+          const rd = new DataView(bm, hb[0], 0x800000), hid = new Uint8Array(bm, hb[19], 0x400000), sh16 = new Uint16Array(bm, hb[20], 0x400000);
+          const idx = (origin >> 1) - width, cnt = width * 242;
+          const g = await gpu.readFb(idx, cnt);
+          const fl = []; let n = 0, nh = 0;
+          for (let k = 0; k < cnt; k++) {
+            const v = rd.getUint16(((idx + k) ^ 1) << 1, true);
+            const hbit = sh16[idx + k] === v ? hid[idx + k] : (v & 1) * 3;
+            if ((g[k] & 0xFFFF) !== v) { n++; if (fl.length < 12) fl.push([k % width, ((k / width) | 0) - 1, v.toString(16), (g[k] & 0xFFFF).toString(16)]); }
+            else if (((g[k] >> 16) & 3) !== hbit) { nh++; if (fl.length < 12) fl.push([k % width, ((k / width) | 0) - 1, 'h' + hbit, 'h' + ((g[k] >> 16) & 3)]); }
+          }
+          c.extra.disp = { origin: origin.toString(16), width, n, nh, fl };
+        }
+        // framebuffer compare (colour + hidden bits, and depth) over the last batch's target
+        if (lastBatch) {
+          const [fmt, w, h, addr, depth] = lastBatch;
+          const pixels = w * h, cIdx = fmt === 4 ? addr * 2 : addr, cCnt = fmt === 4 ? pixels * 2 : pixels;
+          const rd = new DataView(bm, hb[0], 0x800000), hid = new Uint8Array(bm, hb[19], 0x400000), sh16 = new Uint16Array(bm, hb[20], 0x400000);
+          const cmp = async (idx, cnt) => {
+            const g = await gpu.readFb(idx, cnt);
+            let dc = 0, dh = 0, first = -1; const fl = [];
+            for (let k = 0; k < cnt; k++) {
+              const v = rd.getUint16(((idx + k) ^ 1) << 1, true);
+              const hbit = sh16[idx + k] === v ? hid[idx + k] : (v & 1) * 3;
+              if ((g[k] & 0xFFFF) !== v) { dc++; if (first < 0) first = k; if (fl.length < 10 || (dc % 5000) === 0) fl.push([k % w, (k / w) | 0, v.toString(16), (g[k] & 0xFFFF).toString(16)]); }
+              else if (((g[k] >> 16) & 3) !== hbit) dh++;
+            }
+            return { dc, dh, first, cnt, fl };
+          };
+          c.fb = { fmt, w, h, addr: addr.toString(16), depthAddr: depth.toString(16), lb: lastBatch, color: await cmp(cIdx, cCnt), depth: await cmp(depth, pixels) };
+        }
+        const sa = new Uint32Array(A.ex.memory.buffer, A.hi[21], 8), sb = new Uint32Array(bm, hb[21], 8);
+        c.sync = sa[6] === sb[6] && sa[3] === sb[3] && sa[1] === sb[1];
+        c.prims = sa[1];
+      }
+      res.checks.push(c);
+      if (cfg.images) res.images.push({ frame: i, w: out.width, h: out.height, data: b64(out.data) });
+    }
+  }
+  await gpu.device.queue.onSubmittedWorkDone();
+  res.msA = tA / cfg.frames; res.msB = tB / cfg.frames; res.stats = gpu.stats; res.totalMs = performance.now() - t00;
+  return res;
+};
+// Many ROMs, one browser session: run each for a few frames on both renderers and compare everything visible.
+window.runMulti = async function (cfg) {
+  const wasm = await (await fetch('/out/n64.wasm')).arrayBuffer();
+  const sh = {};
+  for (const n of ['rdp', 'vi', 'merge']) sh[n] = await (await fetch(`/src/web/${n}.wgsl`)).text();
+  let gpu = null, lastBatches = [];
+  const mk = async flush => {
+    let mem;
+    const { instance } = await WebAssembly.instantiate(wasm, { env: { host_log: () => {}, host_gpu_flush: () => flush() } });
+    const ex = instance.exports;
+    return { ex, hi: Array.from(new Uint32Array(ex.memory.buffer, ex.n64_host_info(), 24)) };
+  };
+  const A = await mk(() => { lastBatches.push(Array.from(new Uint32Array(A.ex.memory.buffer, A.hi[6], 20))); if (lastBatches.length > 6) lastBatches.shift(); gpu.flush(); });
+  const B = await mk(() => {});
+  sh.allowFallback = true; gpu = await N64Gpu.create(A, null, sh);
+  gpu.reset();
+  if (cfg.noexact) gpu.setExact(false);
+  if (cfg.sharp) { A.ex.n64_config(9, 1); if (B) B.ex.n64_config(9, 1); }     // console video filters off (picture only)
+  if (cfg.hd !== undefined && cfg.hd !== null) { await gpu.setScale(cfg.hd, cfg.hd === 0); if (cfg.hd === 0) gpu.readFb = gpu.readHd; }
+  const load = (C, rom) => { C.ex.n64_free_all(); const p = C.ex.n64_alloc(rom.length); new Uint8Array(C.ex.memory.buffer, p, rom.length).set(rom); return C.ex.n64_load(p, rom.length); };
+  const results = [];
+  for (const url of cfg.roms) {
+    const rom = new Uint8Array(await (await fetch(url)).arrayBuffer());
+    const r = { rom: decodeURIComponent(url).split('/').pop() };
+    try {
+      if (!load(A, rom.slice()) || !load(B, rom.slice())) { r.error = 'load'; results.push(r); continue; }
+      A.ex.n64_config(0, 0); gpu.reset(); lastBatches = [];
+      for (let i = 0; i < cfg.frames; i++) {
+        while (A.ex.n64_frame()) await gpu.syncNow();
+        gpu.present(false);
+        B.ex.n64_frame(); B.ex.n64_vi_render();
+        if ((i & 7) === 7) await gpu.device.queue.onSubmittedWorkDone();
+      }
+      A.ex.n64_config(6, 0); B.ex.n64_config(6, 0);
+      await gpu.device.queue.onSubmittedWorkDone();
+      const out = await gpu.readOutput();
+      const bm = B.ex.memory.buffer, hb = B.hi;
+      const ref = new Uint8Array(bm, hb[1], 640 * out.height * 4);
+      let viDiff = 0, lit = 0;
+      for (let k = 0; k < ref.length; k += 4) { if (ref[k] !== out.data[k] || ref[k + 1] !== out.data[k + 1] || ref[k + 2] !== out.data[k + 2]) viDiff++; if (ref[k] | ref[k + 1] | ref[k + 2]) lit++; }
+      r.vi = viDiff; r.lit = lit; r.h = out.height;
+      if (viDiff) {
+        let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1; r.list = [];
+        for (let k = 0; k < ref.length; k += 4) if (ref[k] !== out.data[k] || ref[k + 1] !== out.data[k + 1] || ref[k + 2] !== out.data[k + 2]) {
+          const x = (k >> 2) % 640, y = ((k >> 2) / 640) | 0; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+          if (r.list.length < 14) r.list.push([x, y, [ref[k], ref[k + 1], ref[k + 2]], [out.data[k], out.data[k + 1], out.data[k + 2]]]);
+        }
+        r.bbox = [x0, y0, x1, y1];
+      }
+      const rd = new DataView(bm, hb[0], 0x800000), hid = new Uint8Array(bm, hb[19], 0x400000), sh16 = new Uint16Array(bm, hb[20], 0x400000);
+      const cmp = async (idx, cnt) => {
+        cnt = Math.min(cnt, 0x400000 - idx); if (cnt <= 0) return [0, 0];
+        const g = await gpu.readFb(idx, cnt);
+        let dc = 0, dh = 0;
+        for (let k = 0; k < cnt; k++) {
+          const v = rd.getUint16(((idx + k) ^ 1) << 1, true);
+          const hbit = sh16[idx + k] === v ? hid[idx + k] : (v & 1) * 3;
+          if ((g[k] & 0xFFFF) !== v) { dc++; if (idx && (r.fl = r.fl || []).length < 14) r.fl.push([idx, k, v.toString(16), (g[k] & 0xFFFF).toString(16)]); } else if (((g[k] >> 16) & 3) !== hbit) dh++;
+        }
+        return [dc, dh];
+      };
+      r.fb = []; const seen = new Set();
+      for (const lb of lastBatches) {
+        const [fmt, w, h, addr, depth] = lb, pixels = w * h, cIdx = fmt === 4 ? addr * 2 : addr, cCnt = fmt === 4 ? pixels * 2 : pixels;
+        for (const [i, c] of (lb[15] & 2) ? [[cIdx, cCnt], [depth, pixels]] : [[cIdx, cCnt]]) { const key = i + ':' + c; if (seen.has(key)) continue; seen.add(key); const [dc, dh] = await cmp(i, c); if (dc || dh) r.fb.push([fmt, w, h, i, dc, dh]); }
+      }
+      r.batches = lastBatches.length;
+      const sa = new Uint32Array(A.ex.memory.buffer, A.hi[21], 8), sb = new Uint32Array(bm, hb[21], 8);
+      r.sync = sa[6] === sb[6] && sa[3] === sb[3] && sa[1] === sb[1]; r.prims = sa[1];
+      if (cfg.images) r.image = { w: out.width, h: out.height, data: b64(out.data) };
+    } catch (e) { r.error = String(e.message || e); }
+    results.push(r);
+    console.log(JSON.stringify({ ...r, image: undefined }));
+  }
+  return { results, stats: gpu.stats };
+};
+</script>

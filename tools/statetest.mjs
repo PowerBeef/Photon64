@@ -1,0 +1,28 @@
+import path from 'path';
+import { chromium } from 'playwright';
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+const page = await (await browser.newContext({ viewport: { width: 1000, height: 700 } })).newPage();
+page.on('console', m => console.log('[page]', m.text().slice(0, 200)));
+page.on('pageerror', e => console.log('[pageerror]', e.message));
+await page.goto('file://' + path.resolve('out/photon64.html'));
+await page.setInputFiles('#file', path.resolve('roms/Super Mario 64 (USA).z64'));
+const frames = () => page.evaluate(() => { const p = window.__photon; const s = new Uint32Array(p.ex.memory.buffer, p.hi[21], 8); return [s[0], s[6].toString(16), s[1]]; });
+await page.waitForTimeout(4000);
+console.log('before save', await frames());
+const t0 = Date.now();
+await page.evaluate(() => window.__photon.saveState());
+console.log('save took', Date.now() - t0, 'ms');
+await page.waitForTimeout(500);
+await page.screenshot({ path: 'out/state_a.png' });
+await page.keyboard.down('Enter'); await page.waitForTimeout(200); await page.keyboard.up('Enter');
+await page.waitForTimeout(5000);
+console.log('later', await frames());
+await page.screenshot({ path: 'out/state_b.png' });
+const t1 = Date.now();
+await page.evaluate(() => window.__photon.loadState());
+console.log('load took', Date.now() - t1, 'ms', 'after load', await frames());
+await page.waitForTimeout(600);
+await page.screenshot({ path: 'out/state_c.png' });
+// keyboard -> controller, audio state
+console.log('audio', await page.evaluate(() => ({ fps: window.__photon.perf.fps })));
+await browser.close();

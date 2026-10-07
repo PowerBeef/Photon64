@@ -1,0 +1,9 @@
+# commercial ROM library (never commit)
+roms/
+# generated: npm packages, Python venv, build outputs, distributable bundle
+node_modules/
+.venv/
+out/
+photon64.html
+# macOS
+.DS_Store

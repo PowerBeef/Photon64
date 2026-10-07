@@ -1,0 +1,30 @@
+<!doctype html><meta charset="utf-8">
+<script src="/src/web/gpu.js"></script>
+<script>
+window.runTest = async function (cfg) {
+  const out = [];
+  const adapter = await navigator.gpu.requestAdapter();
+  const device = await adapter.requestDevice();
+  try { out.push('adapter: ' + JSON.stringify({ v: adapter.info.vendor, a: adapter.info.architecture, d: adapter.info.device, desc: adapter.info.description, fb: adapter.info.isFallbackAdapter })); } catch (e) {}
+  device.addEventListener('uncapturederror', e => out.push('uncaptured: ' + e.error.message));
+  device.lost.then(i => out.push('lost: ' + i.message));
+  const variants = (cfg.inputs || 'n,h0,h1').split(',');
+  for (const v of variants) for (const n of ['merge', 'vi', 'rdp']) {
+    const raw = await (await fetch(`/src/web/${n}.wgsl`)).text();
+    const code = N64Gpu.pp(raw, v[0] === 'h', +v.slice(1) || 0, 0x3FFFFF);
+    const m = device.createShaderModule({ code });
+    const info = await m.getCompilationInfo();
+    const msgs = info.messages.map(e => `${e.type} ${e.lineNum}:${e.linePos} ${e.message}`).join(' | ');
+    if (msgs) out.push(`${v} ${n} msgs: ${msgs}`);
+    if (cfg.frames > 1 || n !== 'rdp') try {
+      const t = performance.now();
+      if (n === 'vi') {
+        for (const [vs, fs, fmt] of [['vs_full', 'fs_aa', 'rgba8uint'], ['vs_full', 'fs_scale', 'rgba8unorm'], ['vs_blit', 'fs_blit', 'bgra8unorm']])
+          await device.createRenderPipelineAsync({ layout: 'auto', vertex: { module: m, entryPoint: vs }, fragment: { module: m, entryPoint: fs, targets: [{ format: fmt }] } });
+      } else await device.createComputePipelineAsync({ layout: 'auto', compute: { module: m, entryPoint: 'main' } });
+      out.push(`${v} ${n} pipeline ok ${(performance.now() - t).toFixed(0)}ms`);
+    } catch (e) { out.push(`${v} ${n} pipeline error: ${e.message}`); }
+  }
+  return out;
+};
+</script>

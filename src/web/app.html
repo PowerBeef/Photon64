@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0e0f13">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Photon64</title>
+<style>
+/* Theme: the console's charcoal greys, with the four colours of its era - green, blue, red, yellow - as the only accents. */
+:root {
+  --bg: #0e0f13; --surface: #181a20; --raised: #22252d; --raised2: #2b2f39; --line: #30343e; --text: #f3f4f6; --dim: #9aa1ae;
+  --green: #22b35c; --blue: #3b7bff; --red: #ea4335; --yellow: #f6c21c; --accent: var(--blue);
+  --round: ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --st: env(safe-area-inset-top, 0px); --sr: env(safe-area-inset-right, 0px); --sb: env(safe-area-inset-bottom, 0px); --sl: env(safe-area-inset-left, 0px);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; border: 0; background: none; padding: 0; }
+svg { display: block; }
+[hidden] { display: none !important; }
+.stripe { height: 4px; border-radius: 4px; background: linear-gradient(90deg, var(--green) 0 25%, var(--blue) 25% 50%, var(--red) 50% 75%, var(--yellow) 75%); }
+.ibtn { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; background: var(--raised); color: var(--text); flex: none; transition: background .15s, transform .1s; }
+.ibtn:hover { background: var(--raised2); }
+.ibtn:active { transform: scale(.94); }
+.ibtn svg { width: 21px; height: 21px; }
+.pbtn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 46px; padding: 0 22px; border-radius: 23px; background: var(--accent); color: #fff;
+  font: 700 16px var(--round); transition: filter .15s, transform .1s; }
+.pbtn:hover { filter: brightness(1.1); }
+.pbtn:active { transform: scale(.97); }
+.pbtn svg { width: 20px; height: 20px; }
+.pbtn.sure, .pbtn.quiet.sure { background: var(--red); color: #fff; }
+.pbtn:disabled { opacity: .4; pointer-events: none; }
+.pbtn.quiet { background: var(--raised); color: var(--text); font-weight: 600; font-size: 14.5px; height: 40px; padding: 0 16px; }
+
+/* ---------- home: the library ---------- */
+#home, .pg-b, #set-body { overscroll-behavior: contain; }
+#home { position: absolute; inset: 0; overflow: auto; -webkit-overflow-scrolling: touch;
+  background: radial-gradient(520px 300px at 0% 0%, rgba(34, 179, 92, .10), transparent 70%), radial-gradient(520px 300px at 100% 0%, rgba(59, 123, 255, .12), transparent 70%), var(--bg); }
+#home .wrap { max-width: 980px; margin: 0 auto; padding: calc(var(--st) + 14px) calc(var(--sr) + 18px) calc(var(--sb) + 28px) calc(var(--sl) + 18px); min-height: 100%; display: flex; flex-direction: column; }
+.top { display: flex; align-items: center; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 11px; flex: 1; min-width: 0; font: 800 25px/1 var(--round); letter-spacing: -.01em; }
+.brand i { font-style: normal; color: var(--yellow); }
+#home .stripe { margin: 14px 0 0; width: 76px; }
+#empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 28px 0 12px; gap: 6px; }
+#empty h2 { font: 800 23px var(--round); margin: 12px 0 0; }
+#empty p { color: var(--dim); margin: 0 0 16px; max-width: 34ch; }
+@media (max-height: 520px) {
+  #empty { display: grid; grid-template-columns: auto minmax(0, 34ch); column-gap: 26px; justify-content: center; align-content: center; text-align: left; padding: 10px 0 0; }
+  #empty #emptyart { grid-row: 1 / 4; align-self: center; }
+  #empty h2 { margin: 0; } #empty p { margin: 0 0 8px; } #empty #drop { justify-self: start; }
+  #pills { padding-top: 14px; }
+}
+#empty.over svg path:first-child, .cart.add.over { stroke: var(--blue); border-color: var(--blue); }
+.sec-h { display: flex; align-items: center; justify-content: space-between; margin: 26px 0 12px; }
+.sec-h h2 { font: 800 19px var(--round); margin: 0; }
+#lib { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 14px; }
+/* a game in the library is drawn as its cartridge: grey shell, the last screenshot as its label */
+.cart { position: relative; display: block; width: 100%; text-align: left; padding: 9px 9px 0; border-radius: 14px 14px 9px 9px; color: var(--text);
+  background: linear-gradient(180deg, #5d626c, #3b3f48); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 6px 16px rgba(0, 0, 0, .35); transition: transform .15s, filter .15s; }
+.cart:hover { transform: translateY(-3px); filter: brightness(1.07); }
+.cart:active { transform: scale(.98); }
+.cart .lbl { position: relative; aspect-ratio: 4 / 3; border-radius: 7px; overflow: hidden; background: #15171c; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .5); }
+.cart .lbl img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cart .lbl .ph { position: absolute; inset: 0; display: grid; place-items: center; font: 800 30px var(--round); color: rgba(255, 255, 255, .92);
+  background: conic-gradient(from 0deg at 50% 50%, var(--blue) 0 25%, var(--yellow) 25% 50%, var(--red) 50% 75%, var(--green) 75%); }
+.cart .lbl .ph::after { content: ""; position: absolute; inset: 0; background: rgba(14, 15, 19, .45); }
+.cart .lbl .ph span { position: relative; z-index: 1; }
+.cart .nm { font: 700 13.5px/1.25 var(--round); margin: 8px 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cart .sub { font-size: 11.5px; color: rgba(255, 255, 255, .62); margin: 1px 2px 0; }
+.cart .grip { height: 9px; margin: 8px 14px 0; border-radius: 3px 3px 0 0; background: repeating-linear-gradient(90deg, #24272e 0 5px, transparent 5px 9px); opacity: .9; }
+.cart .rm { position: absolute; right: 13px; top: 13px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: rgba(14, 15, 19, .72); color: #fff; opacity: 0; transition: opacity .15s; }
+.cart .rm svg { width: 16px; height: 16px; }
+.cart:hover .rm, .cart .rm:focus-visible, body.touchdev .cart .rm { opacity: 1; }
+.cart .rm.sure { background: var(--red); width: auto; padding: 0 10px; font: 700 12px var(--round); opacity: 1; }
+.cart.add { background: none; box-shadow: none; border: 1.5px dashed #4a505c; border-radius: 14px; padding: 0; display: grid; place-items: center; min-height: 150px; color: var(--dim); font: 700 14px var(--round); }
+.cart.add:hover { border-color: var(--blue); color: var(--text); }
+.cart.add svg { width: 30px; height: 30px; margin: 0 auto 6px; }
+#pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 30px; }
+.pill { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; padding: 5px 11px; border-radius: 99px; background: var(--surface); color: var(--dim); }
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+.pill.ok::before { background: var(--green); } .pill.warn::before { background: var(--yellow); }
+.fine { color: #6f7684; font-size: 11.5px; margin: 12px 0 0; }
+
+/* ---------- stage ---------- */
+#stage { position: absolute; inset: 0; background: #000; display: flex; flex-direction: column; touch-action: none; }
+#screen { position: relative; flex: 1; min-height: 0; }
+#screen canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+#cv-sw { image-rendering: auto; }
+#cv-sw.px { image-rendering: pixelated; }
+#hud { position: absolute; left: 8px; top: 6px; font: 11.5px ui-monospace, Menlo, monospace; color: #dfe6f2; background: rgba(14, 15, 19, .62); padding: 3px 8px; border-radius: 7px;
+  pointer-events: none; white-space: pre; z-index: 5; }
+/* the one button on the game screen: it pauses and opens the menu. With a mouse it shows while the pointer moves. */
+#b-menu { position: absolute; z-index: 20; display: block; opacity: .92; transition: opacity .25s; }
+#b-menu:active { opacity: 1; transform: scale(.94); }
+body:not(.touch) #b-menu.idle { opacity: 0; }
+#flag { position: absolute; z-index: 12; left: 50%; top: calc(var(--st) + 12px); transform: translateX(-50%); display: flex; align-items: center; gap: 7px; padding: 6px 13px; border-radius: 99px;
+  background: rgba(14, 15, 19, .78); font: 700 13px var(--round); pointer-events: none; }
+#flag svg { width: 15px; height: 15px; color: var(--yellow); }
+#toast { position: absolute; left: 50%; bottom: 9%; transform: translateX(-50%) translateY(6px); background: rgba(24, 26, 32, .96); box-shadow: 0 6px 22px rgba(0, 0, 0, .45), inset 0 0 0 1px rgba(255, 255, 255, .07);
+  padding: 9px 16px; border-radius: 14px; font-size: 13.5px; opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; z-index: 60; max-width: min(86vw, 520px); text-align: center; }
+#toast.show { opacity: 1; transform: translateX(-50%); }
+
+/* ---------- touch controls ---------- */
+/* The artwork is inline SVG generated by PadArt (pad.js); position and size of every control are computed in layoutControls()
+   (app.js) from the real viewport and its safe area. Only the pressed look lives here. */
+#touch { position: absolute; inset: 0; z-index: 15; pointer-events: none; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+#touch .t, #touch .art { position: absolute; pointer-events: none; }
+#touch svg, #b-menu svg { display: block; width: 100%; height: 100%; overflow: visible; }
+#touch .lit, #touch .glow, #b-menu .lit, #b-menu .glow { opacity: 0; }
+#touch .t.down { opacity: 1 !important; }
+#touch .t.down .lit { opacity: .3; }
+#touch .t.down .glow { opacity: .95; }
+#touch .t[data-b].down > svg { transform: scale(.95); }
+#nub { position: absolute; left: 27.5%; top: 27.5%; width: 45%; height: 45%; will-change: transform; }
+#touch .dp { border-radius: 32%; }
+#touch .dp.down { background: radial-gradient(closest-side, rgba(255, 255, 255, .62), rgba(255, 255, 255, 0)); }
+
+/* ---------- the sheet: game menu, save states, settings ---------- */
+#sheet { position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: calc(var(--st) + 12px) calc(var(--sr) + 12px) calc(var(--sb) + 12px) calc(var(--sl) + 12px); }
+#sheet .scrim { position: absolute; inset: 0; background: rgba(6, 7, 10, .62); backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px); animation: fade .18s ease-out; }
+#sheet .panel { position: relative; width: min(470px, 100%); max-height: 100%; display: flex; flex-direction: column; background: var(--surface); border-radius: 24px; overflow: hidden;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .6), inset 0 0 0 1px rgba(255, 255, 255, .06); animation: rise .22s cubic-bezier(.2, .8, .2, 1); }
+#sheet.wide .panel { width: min(600px, 100%); height: min(640px, 100%); }
+#sheet .panel > .stripe { border-radius: 0; flex: none; }
+@keyframes fade { from { opacity: 0; } }
+@keyframes rise { from { opacity: 0; transform: translateY(18px) scale(.98); } }
+@media (max-width: 560px) and (orientation: portrait) {
+  #sheet { align-items: flex-end; padding: calc(var(--st) + 24px) 0 0; }
+  #sheet .panel { width: 100%; border-radius: 26px 26px 0 0; padding-bottom: var(--sb); }
+  #sheet.wide .panel { height: min(680px, 86%); }
+}
+.pg { display: flex; flex-direction: column; min-height: 0; }
+.pg-h { display: flex; align-items: center; gap: 12px; padding: 16px 18px 12px; flex: none; }
+.pg-h h2 { flex: 1; min-width: 0; margin: 0; font: 800 20px var(--round); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pg-h .ibtn { width: 38px; height: 38px; }
+.pg-b { overflow: auto; -webkit-overflow-scrolling: touch; padding: 2px 18px 18px; min-height: 0; }
+/* game menu */
+.now { display: flex; align-items: center; gap: 13px; padding: 16px 18px 6px; }
+.now img, .now .noimg { width: 92px; aspect-ratio: 4 / 3; border-radius: 10px; object-fit: cover; background: #0c0d10; flex: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); }
+.now div { min-width: 0; flex: 1; }
+.now b { display: block; font: 800 19px/1.2 var(--round); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.now span { color: var(--dim); font-size: 12.5px; }
+.tiles { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; padding: 12px 18px 10px; }
+.tiles .tile { grid-column: span 2; }
+.tiles.n5 #m-mute, .tiles.n5 #m-set { grid-column: span 3; }      /* no full screen on this device: three and two */
+.foot { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 18px 18px; }
+.tile { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 13px 4px 11px; border-radius: 18px; background: var(--raised); color: var(--text); font: 600 12.5px var(--round); transition: background .15s, transform .1s; }
+.tile:hover { background: var(--raised2); }
+.tile:active { transform: scale(.96); }
+.tile i { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; background: var(--c, #3a3f4a); color: #fff; box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, .28), inset 0 -3px 6px rgba(0, 0, 0, .22); }
+.tile i svg { width: 23px; height: 23px; }
+.tile.on { box-shadow: inset 0 0 0 2px var(--c); }
+.tile.sure { background: var(--red); }
+.tile.sure i { background: rgba(0, 0, 0, .25); }
+.tile.low { flex-direction: row; justify-content: center; gap: 10px; padding: 9px 8px; font-size: 14px; }
+.tile.low i { width: 34px; height: 34px; }
+.tile.low i svg { width: 18px; height: 18px; }
+.tiles .tile.main { grid-column: 1 / -1; flex-direction: row; justify-content: center; gap: 10px; padding: 0; height: 52px; border-radius: 26px; background: var(--green); color: #fff; font: 800 17px var(--round); }
+.tile.main:hover { background: var(--green); filter: brightness(1.08); }
+.tile.main svg { width: 20px; height: 20px; }
+/* save state slots */
+.slots { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.slot { display: block; text-align: left; border-radius: 14px; background: var(--raised); padding: 8px 8px 9px; color: var(--text); transition: background .15s, transform .1s; }
+@media (min-width: 620px) and (max-height: 520px) {                /* a phone on its side: one row, a wider sheet */
+  #sheet .panel { width: min(660px, 100%); }
+  .tiles .tile, .tiles.n5 #m-mute, .tiles.n5 #m-set { grid-column: span 1; }
+  .tiles.n5 { grid-template-columns: repeat(5, 1fr); }
+  .tiles .tile.main { grid-column: 1 / -1; height: 46px; }
+  .slots { grid-template-columns: repeat(4, 1fr); }
+  .now { padding-top: 12px; } .now img { width: 76px; }
+}
+.slot:hover { background: var(--raised2); }
+.slot:active { transform: scale(.97); }
+.slot:disabled { opacity: .45; cursor: default; }
+.slot .im { aspect-ratio: 4 / 3; border-radius: 8px; background: #0c0d10 center / cover; display: grid; place-items: center; color: #4a4f5b; font: 800 26px var(--round); }
+.slot b { display: block; font: 700 13.5px var(--round); margin: 7px 3px 0; }
+.slot span { display: block; color: var(--dim); font-size: 12px; margin: 0 3px; }
+.hint { color: var(--dim); font-size: 12.5px; margin: 12px 2px 0; }
+/* settings */
+.tabs { display: flex; gap: 6px; padding: 0 18px 12px; flex: none; }
+.tabs button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 9px 2px 7px; border-radius: 14px; color: var(--dim); font: 600 11.5px var(--round); background: var(--raised); transition: color .15s, background .15s; }
+.tabs button svg { width: 21px; height: 21px; }
+.tabs button.on { color: #fff; background: var(--c); }
+.row { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px 14px; padding: 12px 0; border-bottom: 1px solid #262a33; }
+.row:last-child { border-bottom: 0; }
+.row > label { flex: 1 1 150px; min-width: 0; font-weight: 600; }
+.row small { display: block; color: var(--dim); font-size: 12px; font-weight: 400; margin-top: 1px; }
+.seg { display: inline-flex; background: #0f1014; border-radius: 12px; padding: 3px; gap: 2px; max-width: 100%; }
+.seg button { padding: 7px 12px; border-radius: 9px; color: var(--dim); font: 600 13px var(--round); white-space: nowrap; transition: background .15s, color .15s; }
+.seg button.on { background: var(--raised2); color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1); }
+.seg button:disabled { opacity: .35; cursor: default; }
+input[type=checkbox] { appearance: none; -webkit-appearance: none; width: 48px; height: 28px; border-radius: 14px; background: #0f1014; position: relative; cursor: pointer; transition: background .18s; flex: none; margin: 0; }
+input[type=checkbox]::after { content: ""; position: absolute; left: 3px; top: 3px; width: 22px; height: 22px; border-radius: 50%; background: #8d94a1; transition: transform .18s, background .18s; }
+input[type=checkbox]:checked { background: var(--green); }
+input[type=checkbox]:checked::after { transform: translateX(20px); background: #fff; }
+input[type=range] { appearance: none; -webkit-appearance: none; width: 170px; max-width: 100%; height: 28px; background: none; margin: 0; }
+input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: #0f1014; }
+input[type=range]::-moz-range-track { height: 6px; border-radius: 3px; background: #0f1014; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; margin-top: -8px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .5); }
+input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border: 0; border-radius: 50%; background: #fff; }
+h3 { font: 700 12px var(--round); text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 18px 0 2px; }
+#binds { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 6px; margin-top: 8px; }
+#binds button { display: flex; justify-content: space-between; gap: 8px; background: var(--raised); border-radius: 10px; padding: 8px 10px; font-size: 13px; color: var(--text); }
+#binds button b { font: 600 12px ui-monospace, Menlo, monospace; color: var(--yellow); }
+#binds button.wait { box-shadow: inset 0 0 0 2px var(--blue); }
+.btnrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+#dispbox { margin-top: 14px; color: var(--dim); font-size: 12.5px; }
+#dispbox summary { cursor: pointer; padding: 6px 0; }
+#dispinfo { margin: 6px 0 0; padding: 10px 12px; border-radius: 10px; background: #111318; color: #c9ced8; font: 11.5px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word; user-select: text; -webkit-user-select: text; }
+.about { color: var(--dim); font-size: 12.5px; margin-top: 14px; }
+</style>
+</head>
+<body>
+<div id="home">
+  <div class="wrap">
+    <div class="top">
+      <div class="brand"><span id="logo"></span><span>Photon<i>64</i></span></div>
+      <button class="ibtn" id="h-set" title="Settings" aria-label="Settings"></button>
+    </div>
+    <div class="stripe"></div>
+    <div id="empty">
+      <span id="emptyart"></span>
+      <h2>Add your first game</h2>
+      <p id="emptymsg">Choose a ROM you have dumped (.z64, .n64, .v64 or a .zip), or drop it here. It stays on this device.</p>
+      <button class="pbtn" id="drop" type="button"></button>
+    </div>
+    <section id="libwrap" hidden>
+      <div class="sec-h"><h2>Library</h2></div>
+      <div id="lib"></div>
+    </section>
+    <div id="pills"></div>
+    <p class="fine">Bring your own legally dumped games; no ROM or BIOS data is included. Pixel pipeline modelled after parallel-RDP (MIT, Hans-Kristian Arntzen); hardware behaviour cross-checked against ares (ISC) and public test ROMs.</p>
+  </div>
+</div>
+<input id="file" type="file" accept=".z64,.n64,.v64,.rom,.bin,.zip,application/zip,application/octet-stream" hidden>
+
+<div id="stage" hidden>
+  <div id="screen">
+    <canvas id="cv-gpu"></canvas>
+    <canvas id="cv-sw" hidden></canvas>
+  </div>
+  <div id="hud" hidden></div>
+  <div id="flag" hidden></div>
+  <button id="b-menu" title="Menu (Esc)" aria-label="Menu"></button>
+  <div id="touch" hidden>
+    <div class="t" id="stick"></div>
+    <div class="art" id="dpad"></div>
+    <div class="t dp" data-b="DU"></div><div class="t dp" data-b="DD"></div><div class="t dp" data-b="DL"></div><div class="t dp" data-b="DR"></div>
+    <div class="t" data-b="L"></div><div class="t" data-b="R"></div>
+    <div class="t" data-b="A"></div><div class="t" data-b="B"></div><div class="t" data-b="Z"></div>
+    <div class="art" id="cplate"></div>
+    <div class="t cb" data-b="CU"></div><div class="t cb" data-b="CD"></div><div class="t cb" data-b="CL"></div><div class="t cb" data-b="CR"></div>
+    <div class="t" data-b="START"></div>
+  </div>
+</div>
+
+<div id="sheet" hidden>
+  <div class="scrim"></div>
+  <div class="panel" role="dialog" aria-modal="true">
+    <div class="stripe"></div>
+    <!-- game menu -->
+    <div class="pg" id="pg-menu" hidden>
+      <div class="now"><img id="m-thumb" alt=""><div><b id="m-title"></b><span id="m-sub"></span></div></div>
+      <div class="tiles">
+        <button class="tile main" id="m-resume"></button>
+        <button class="tile" id="m-save" style="--c: var(--blue)"><i></i>Save state</button>
+        <button class="tile" id="m-load" style="--c: var(--blue)"><i></i>Load state</button>
+        <button class="tile" id="m-ff" style="--c: #d49b00"><i></i>Fast forward</button>
+        <button class="tile" id="m-mute" style="--c: #6b7280"><i></i><span>Sound</span></button>
+        <button class="tile" id="m-full" style="--c: #6b7280"><i></i>Full screen</button>
+        <button class="tile" id="m-set" style="--c: #6b7280"><i></i>Settings</button>
+      </div>
+      <div class="foot">
+        <button class="tile low" id="m-reset" style="--c: var(--red)"><i></i><span>Reset</span></button>
+        <button class="tile low" id="m-home" style="--c: #7c5cff"><i></i>Library</button>
+      </div>
+    </div>
+    <!-- save state slots -->
+    <div class="pg" id="pg-states" hidden>
+      <div class="pg-h"><button class="ibtn" data-nav="back" aria-label="Back"></button><h2 id="st-title">Save state</h2></div>
+      <div class="pg-b"><div class="slots" id="slots"></div><p class="hint" id="st-hint"></p></div>
+    </div>
+    <!-- settings -->
+    <div class="pg" id="pg-settings" hidden>
+      <div class="pg-h"><button class="ibtn" data-nav="back" aria-label="Back"></button><h2>Settings</h2></div>
+      <div class="tabs" id="tabs">
+        <button data-tab="video" style="--c: var(--blue)"></button><button data-tab="console" style="--c: var(--green)"></button>
+        <button data-tab="pad" style="--c: var(--red)"></button><button data-tab="data" style="--c: #d49b00"></button>
+      </div>
+      <div class="pg-b" id="set-body">
+        <div data-pane="video">
+          <div class="row"><label>Renderer<small id="gpuinfo">—</small></label><select id="s-renderer"><option value="auto">WebGPU</option><option value="sw">Software</option></select></div>
+          <div class="row"><label>Resolution<small id="scaleinfo">Draws 3D sharper than the console could. Needs a fast GPU.</small></label><select id="s-scale"><option value="0">Native</option><option value="1">2×</option><option value="2">4×</option></select></div>
+          <div class="row"><label for="s-vif">Console video filter<small>The console's own edge smoothing and fine noise. Off shows the raw pixels.</small></label><input type="checkbox" id="s-vif"></div>
+          <div class="row"><label>Scaling<small>How the picture is fitted to your screen.</small></label><select id="s-filter"><option value="1">Sharp</option><option value="2">Smooth</option><option value="0">Pixels</option></select></div>
+          <div class="row"><label>Shape</label><select id="s-aspect"><option value="0">4:3</option><option value="1">Stretch</option></select></div>
+          <div class="row"><label for="s-readback">Exact framebuffer effects<small>Lens flares, glare and blur as on the console. Turn off only if a game runs slowly.</small></label><input type="checkbox" id="s-readback"></div>
+          <div class="row"><label for="s-hud">Performance readout</label><input type="checkbox" id="s-hud"></div>
+        <details id="dispbox"><summary>Display details</summary><pre id="dispinfo"></pre></details>
+        </div>
+        <div data-pane="console" hidden>
+          <div class="row"><label>CPU speed<small>Overclocking smooths out slowdowns in demanding games.</small></label><select id="s-cpi"><option value="4">Original</option><option value="3">1.33×</option><option value="2">2×</option></select></div>
+          <div class="row"><label>Expansion Pak<small id="xpakinfo"></small></label><select id="s-xpak"><option value="auto">Auto</option><option value="on">Installed</option><option value="off">Removed</option></select></div>
+          <div class="row"><label>Controller slot</label><select id="s-pak"><option value="1">Controller Pak</option><option value="2">Rumble Pak</option><option value="0">Empty</option></select></div>
+          <div class="row"><label for="s-vol">Volume</label><input type="range" id="s-vol" min="0" max="100"></div>
+        </div>
+        <div data-pane="pad" hidden>
+          <div class="row"><label>On-screen pad</label><select id="s-touch"><option value="auto">Auto</option><option value="on">Always</option><option value="off">Never</option></select></div>
+          <div class="row"><label for="s-dpad">D-pad</label><input type="checkbox" id="s-dpad"></div>
+          <div class="row"><label for="s-zr">Swap Z and R<small>Puts R beside A and B, for games that need A and R held together.</small></label><input type="checkbox" id="s-zr"></div>
+          <div class="row"><label for="s-tsize">Size</label><input type="range" id="s-tsize" min="70" max="130"></div>
+          <div class="row"><label for="s-tlift">Height<small>How far up from the bottom edge the pad sits.</small></label><input type="range" id="s-tlift" min="0" max="100"></div>
+          <div class="row"><label for="s-top">Opacity<small>For controls that lie on the picture.</small></label><input type="range" id="s-top" min="15" max="100"></div>
+          <h3>Keyboard</h3>
+          <div id="binds"></div>
+          <div class="btnrow"><button class="pbtn quiet" id="s-keys-reset">Reset keys</button></div>
+          <p class="about">A standard gamepad works too, rumble included. F2 saves and F4 loads the first state slot; Esc opens the menu.</p>
+        </div>
+        <div data-pane="data" hidden>
+          <div class="row"><label for="s-keep">Keep games in the library<small>Stores each game you open in this browser so it can be started from the home screen.</small></label><input type="checkbox" id="s-keep"></div>
+          <h3>Game save</h3>
+          <div class="btnrow"><button class="pbtn quiet" id="s-export">Export save</button><button class="pbtn quiet" id="s-import">Import save</button></div>
+          <p class="about">Battery saves, Controller Pak data and save states are kept in this browser. Export a save to back it up or move it to another device.</p>
+          <input id="savefile" type="file" hidden>
+          <h3>Settings</h3>
+          <div class="btnrow"><button class="pbtn quiet" id="s-defaults">Restore default settings</button></div>
+          <p class="about">Puts every setting and key back to how it started. Your library, saves and save states are kept.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<!--@SCRIPT-->
+</body>
+</html>

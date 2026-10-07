@@ -1,0 +1,75 @@
+// The new interface end to end: library, game menu, state slots, settings, and what survives a reload.
+//   node tools/uiflow.mjs "dir with nicely named ROMs"
+import fs from 'fs'; import path from 'path';
+import { chromium } from 'playwright';
+const romDir = process.argv[2], roms = fs.readdirSync(romDir).filter(f => /Mario/.test(f)).sort();
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+const page = await (await browser.newContext({ viewport: { width: 393, height: 852 }, hasTouch: true, isMobile: true })).newPage();
+let bad = 0; const errs = [];
+page.on('pageerror', e => { errs.push(e.message); console.log('[pageerror]', e.message); });
+const check = (name, ok, extra = '') => { console.log(ok ? 'ok  ' : 'FAIL', name, extra); if (!ok) bad++; };
+const url = 'file://' + path.resolve('out/photon64.html');
+const ev = f => page.evaluate(f);
+const st = () => ev(() => { const p = window.__photon, q = s => document.querySelector(s); return { rom: p.rom && p.rom.name, home: !q('#home').hidden, stage: !q('#stage').hidden, sheet: !q('#sheet').hidden,
+  page: ['menu', 'states', 'settings'].find(n => !q('#pg-' + n).hidden), flag: q('#flag').hidden ? '' : q('#flag').textContent, toast: q('#toast').textContent,
+  frames: p.rom ? new Uint32Array(p.ex.memory.buffer, p.hi[21], 8)[0] : 0, carts: [...document.querySelectorAll('#lib .cart .nm')].map(e => e.textContent), empty: !q('#empty').hidden }; });
+const frames = async () => (await st()).frames;
+await page.goto(url); await page.waitForTimeout(600);
+let s = await st(); check('starts on an empty library', s.home && s.empty && !s.stage && !s.sheet);
+await page.keyboard.press('Escape'); s = await st(); check('Esc without a game does nothing', !s.sheet);
+await page.click('#h-set'); s = await st(); check('settings open from home', s.sheet && s.page === 'settings' && await ev(() => document.getElementById('s-export').disabled));
+await page.keyboard.press('Escape'); s = await st(); check('Esc closes them', !s.sheet && s.home);
+
+await page.setInputFiles('#file', path.join(romDir, roms[1])); await page.waitForTimeout(3500);
+s = await st(); check('game starts, named from the file', s.rom === 'Super Mario 64' && s.stage && !s.home && !s.sheet, s.rom);
+let a = await frames(); await page.waitForTimeout(600); let b = await frames(); check('running', b > a);
+await page.tap('#b-menu'); await page.waitForTimeout(500);
+s = await st(); check('menu button opens the menu', s.sheet && s.page === 'menu' && await ev(() => document.getElementById('m-title').textContent) === 'Super Mario 64');
+a = await frames(); await page.waitForTimeout(600); b = await frames(); check('game waits while the menu is up', a === b);
+check('pad ignores touches under the sheet', await ev(() => window.__photon.touchState.buttons) === 0);
+await page.tap('#m-mute'); check('sound tile toggles', await ev(() => window.__photon.settings.mute && /Sound off/.test(document.getElementById('m-mute').textContent)));
+await page.tap('#m-mute');
+await page.tap('#m-save'); await page.waitForTimeout(300); s = await st(); check('save page', s.page === 'states' && await ev(() => document.querySelectorAll('#slots .slot').length) === 4);
+await page.tap('#slots .slot:nth-child(2)'); await page.waitForTimeout(1500);
+s = await st(); check('saving to slot 2 returns to the game', !s.sheet && /Saved to slot 2/.test(s.toast), s.toast);
+const mark = await frames(); await page.waitForTimeout(2500);
+await page.tap('#b-menu'); await page.tap('#m-load'); await page.waitForTimeout(400);
+const slots = await ev(() => [...document.querySelectorAll('#slots .slot')].map(e => ({ off: e.disabled, pic: !!e.firstChild.style.backgroundImage, sub: e.children[2].textContent })));
+check('load page: only slot 2 can be chosen, with its picture', slots[0].off && !slots[1].off && slots[1].pic && slots[2].off && slots[1].sub === 'Just now', JSON.stringify(slots.map(x => x.sub)));
+const before = await frames();
+await page.tap('#slots .slot:nth-child(2)'); await page.waitForTimeout(1200);
+s = await st(); check('loading slot 2 goes back in time and resumes', !s.sheet && /Loaded slot 2/.test(s.toast) && s.frames < before - 50, `${mark} -> ${before} -> ${s.frames}`);
+await page.tap('#b-menu'); await page.tap('#m-ff'); await page.waitForTimeout(300);
+s = await st(); check('fast forward latches and shows a flag', !s.sheet && /Fast forward/.test(s.flag));
+await page.tap('#b-menu'); await page.tap('#m-ff');
+s = await st(); check('and unlatches', s.flag === '');
+await page.tap('#b-menu'); await page.tap('#m-set'); await page.waitForTimeout(200);
+s = await st(); check('settings from the menu', s.page === 'settings');
+await page.tap('#tabs [data-tab=video]');
+const seg = await ev(() => { const sel = document.getElementById('s-aspect'), g = sel._seg; g.children[1].click(); const v = sel.value, on = g.children[1].classList.contains('on'); g.children[0].click(); return [v, on, window.__photon.settings.aspect]; });
+check('segmented control drives its setting', seg[1] && seg[0] !== String(seg[2]), JSON.stringify(seg));
+await page.tap('#pg-settings [data-nav=back]'); s = await st(); check('back returns to the menu', s.page === 'menu' && s.sheet);
+await page.tap('#m-reset'); s = await st(); check('reset asks first', s.sheet && /Tap to reset/.test(await ev(() => document.getElementById('m-reset').textContent)));
+await page.tap('#m-reset'); await page.waitForTimeout(600); s = await st(); check('second tap resets', !s.sheet && /Game reset/.test(s.toast) && s.frames < 120, String(s.frames));
+await page.waitForTimeout(6000);
+await page.tap('#b-menu'); await page.waitForTimeout(700); await page.tap('#m-home'); await page.waitForTimeout(600);
+s = await st(); check('library shows the game', s.home && !s.stage && !s.rom && s.carts.join() === 'Super Mario 64', s.carts.join());
+await page.setInputFiles('#file', path.join(romDir, roms[0])); await page.waitForTimeout(3000);
+await page.tap('#b-menu'); await page.waitForTimeout(500); await page.tap('#m-home'); await page.waitForTimeout(600);
+s = await st(); check('second game goes in front', s.carts.join() === 'Mario Kart 64,Super Mario 64', s.carts.join());
+
+await page.reload(); await page.waitForTimeout(900);
+s = await st(); check('library survives a reload', s.home && s.carts.join() === 'Mario Kart 64,Super Mario 64', s.carts.join());
+await page.tap('#lib .cart:nth-child(2)'); await page.waitForTimeout(3000);
+s = await st(); check('a card starts its game without the file', s.rom === 'Super Mario 64' && s.stage && s.frames > 10, s.rom + ' ' + s.frames);
+await page.tap('#b-menu'); await page.tap('#m-load'); await page.waitForTimeout(400);
+check('its state slot is still there', await ev(() => !document.querySelector('#slots .slot:nth-child(2)').disabled));
+await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); s = await st(); check('Esc twice: back, then resume', !s.sheet && s.flag === '');
+await page.tap('#b-menu'); await page.tap('#m-home'); await page.waitForTimeout(600);
+s = await st(); check('played game moves to the front', s.carts[0] === 'Super Mario 64');
+await page.tap('#lib .cart:nth-child(1) .rm'); s = await st(); check('remove asks first', s.carts.length === 2 && s.home);
+await page.tap('#lib .cart:nth-child(1) .rm'); await page.waitForTimeout(500); s = await st(); check('second tap removes', s.carts.join() === 'Mario Kart 64', s.carts.join());
+check('and frees the stored game', await ev(async () => (await window.__photon.libList()).length) === 1);
+check('no page errors', errs.length === 0);
+await browser.close();
+console.log(bad ? `${bad} FAILED` : 'all passed'); process.exit(bad ? 1 : 0);

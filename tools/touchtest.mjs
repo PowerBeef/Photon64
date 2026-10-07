@@ -1,0 +1,44 @@
+import path from 'path';
+import { chromium } from 'playwright';
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+const portrait = process.argv.includes('--portrait');
+const ctx = await browser.newContext({ viewport: portrait ? { width: 402, height: 874 } : { width: 844, height: 390 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
+const page = await ctx.newPage();
+page.on('pageerror', e => console.log('[pageerror]', e.message));
+await page.goto('file://' + path.resolve('out/photon64.html'));
+await page.setInputFiles('#file', path.resolve('roms/Super Mario 64 (USA).z64'));
+await page.waitForTimeout(2500);
+const rect = sel => page.evaluate(s => { const r = document.querySelector(s).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }; }, sel);
+const state = () => page.evaluate(() => ({ b: window.__photon.touchState.buttons.toString(16), x: Math.round(window.__photon.touchState.x), y: Math.round(window.__photon.touchState.y) }));
+const cdp = await ctx.newCDPSession(page);
+const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((p, i) => ({ x: p.x, y: p.y, id: p.id ?? i })) });
+const A = await rect('#touch .t[data-b=A]'), B = await rect('#touch .t[data-b=B]'), Z = await rect('#touch .t[data-b=Z]'), S = await rect('#stick'), ST = await rect('#touch .t[data-b=START]');
+console.log('idle', await state());
+await touch('touchStart', [{ x: A.x, y: A.y, id: 1 }]); console.log('A down', await state());
+await touch('touchStart', [{ x: A.x, y: A.y, id: 1 }, { x: S.x + S.w * 0.3, y: S.y - S.w * 0.3, id: 2 }]); console.log('+ stick up-right', await state());
+await touch('touchMove', [{ x: B.x, y: B.y, id: 1 }, { x: S.x - S.w, y: S.y, id: 2 }]); console.log('B + stick far left', await state());
+await touch('touchEnd', []); console.log('released', await state());
+// one thumb rolled between two neighbours must hold both
+const mid = (p, q) => { const d = Math.hypot(q.x - p.x, q.y - p.y), t = (d + p.w / 2 - q.w / 2) / 2 / d; return { x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t }; };
+const combo = async (n, p, q, want) => { await touch('touchStart', [{ ...mid(p, q), id: 7 }]); const st = await state(); await touch('touchEnd', []); console.log(n, st.b, parseInt(st.b, 16) === want ? 'ok' : 'MISSING'); };
+const press = async (n, p, want) => { await touch('touchStart', [{ x: p.x, y: p.y, id: 8 }]); const st = await state(); await touch('touchEnd', []); console.log(n, st.b, parseInt(st.b, 16) === want ? 'ok' : 'WRONG'); };
+await combo('A+B', A, B, 0xc000); await combo('A+Z', A, Z, 0xa000); await combo('B+Z', B, Z, 0x6000);
+const C = {}; for (const k of ['CU', 'CD', 'CL', 'CR', 'DU', 'DD', 'DL', 'DR', 'L', 'R']) C[k] = await rect(`#touch .t[data-b=${k}]`);
+await combo('C up+right', C.CU, C.CR, 0x9); await combo('C down+left', C.CD, C.CL, 0x6); await combo('D up+left', C.DU, C.DL, 0xa00);
+await press('C plate centre', { x: (C.CL.x + C.CR.x) / 2, y: C.CL.y }, 0); await press('D-pad centre', { x: (C.DL.x + C.DR.x) / 2, y: C.DL.y }, 0);
+for (const [k, m] of [['CU', 8], ['CD', 4], ['CL', 2], ['CR', 1], ['DU', 0x800], ['DD', 0x400], ['DL', 0x200], ['DR', 0x100], ['L', 0x20], ['R', 0x10]]) await press(k, C[k], m);
+// Z and R swapped: R joins the triangle, Z goes to the shoulder
+await page.evaluate(() => { const el = document.getElementById('s-zr'); el.checked = true; el.dispatchEvent(new Event('change')); });
+await page.waitForTimeout(300);
+const R2 = await rect('#touch .t[data-b=R]'), Z2 = await rect('#touch .t[data-b=Z]');
+await combo('swapped: A+R', A, R2, 0x8010); await press('swapped: shoulder is Z', Z2, 0x2000);
+console.log('swapped: R sits where Z was', Math.abs(R2.x - Z.x) < 1 && Math.abs(R2.y - Z.y) < 1 ? 'ok' : 'WRONG');
+await page.evaluate(() => { const el = document.getElementById('s-zr'); el.checked = false; el.dispatchEvent(new Event('change')); });
+await page.waitForTimeout(300);
+await touch('touchStart', [{ x: ST.x, y: ST.y, id: 3 }]); console.log('START', await state()); await touch('touchEnd', []);
+// does the game see it? hold START a moment and check the core's controller word
+await page.waitForTimeout(3000);
+await touch('touchStart', [{ x: ST.x, y: ST.y, id: 4 }]); await page.waitForTimeout(300); await touch('touchEnd', []);
+await page.waitForTimeout(2500);
+await page.screenshot({ path: 'out/touch_after_start.png' });
+await browser.close();
