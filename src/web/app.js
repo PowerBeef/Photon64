@@ -632,6 +632,9 @@ function audioPump(drop) {
 const keysDown = new Set();
 const touchState = { buttons: 0, x: 0, y: 0 };
 let rebinding = null, rumbleOn = false;
+let inputStamp = 0;
+const inputTimes = [];
+function observeInput() { if (rom && running && !paused && !inputStamp) inputStamp = performance.now(); }
 const padSlots = [null, null, null, null];
 function readInput() {
   let b = touchState.buttons, x = touchState.x, y = touchState.y;
@@ -678,13 +681,14 @@ addEventListener('keydown', e => {
   if (e.code === k.FF) { fastForward = true; e.preventDefault(); return; }
   if (e.code === 'F2' && !e.repeat) { saveState(); e.preventDefault(); return; }
   if (e.code === 'F4' && !e.repeat) { loadState(); e.preventDefault(); return; }
-  if (Object.values(k).includes(e.code)) { keysDown.add(e.code); e.preventDefault(); audioStart(); }
+  if (Object.values(k).includes(e.code)) { keysDown.add(e.code); observeInput(); e.preventDefault(); audioStart(); }
 });
-addEventListener('keyup', e => { keysDown.delete(e.code); if (e.code === settings.keys.FF) { fastForward = false; if (!ffLock) audioReset(); } });
+addEventListener('keyup', e => { if (keysDown.has(e.code)) observeInput(); keysDown.delete(e.code); if (e.code === settings.keys.FF) { fastForward = false; if (!ffLock) audioReset(); } });
 function releaseInput() {
   const stage = $('stage');
   for (const id of pointers.keys()) { try { if (stage.hasPointerCapture(id)) stage.releasePointerCapture(id); } catch (e) { /* pointer already ended */ } }
   keysDown.clear(); fastForward = false; pointers.clear(); stickPid = null; touchUpdate();
+  inputStamp = 0;
   if (ex) for (let port = 0; port < 4; port++) ex.n64_input(port, 0, 0, 0);
 }
 addEventListener('blur', releaseInput);
@@ -915,15 +919,15 @@ function initTouch() {
   const chrome = e => e.target.closest('#b-menu');
   const down = e => {
     if ($('touch').hidden || e.pointerType === 'mouse' || chrome(e) || sheetOpen()) return;
-    audioStart();
+    audioStart(); observeInput();
     if (!touchEls.length) touchLayout();
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try { stage.setPointerCapture(e.pointerId); } catch (e) { /* synthetic pointer or a pointer that already ended */ }
     if ((stickPid === null || !pointers.has(stickPid)) && inStick(e.clientX, e.clientY)) stickPid = e.pointerId;
     touchUpdate(); e.preventDefault();
   };
-  const move = e => { const p = pointers.get(e.pointerId); if (!p) return; p.x = e.clientX; p.y = e.clientY; touchUpdate(); e.preventDefault(); };
-  const up = e => { if (!pointers.delete(e.pointerId)) return; if (e.pointerId === stickPid) stickPid = null; touchUpdate(); };
+  const move = e => { const p = pointers.get(e.pointerId); if (!p) return; observeInput(); p.x = e.clientX; p.y = e.clientY; touchUpdate(); e.preventDefault(); };
+  const up = e => { if (!pointers.delete(e.pointerId)) return; observeInput(); if (e.pointerId === stickPid) stickPid = null; touchUpdate(); };
   stage.addEventListener('pointerdown', down, { passive: false });
   stage.addEventListener('pointermove', move, { passive: false });
   for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) stage.addEventListener(t, up);
@@ -969,6 +973,7 @@ function emulate(drawLast, dropAudio) {
 function finishField(drawLast, dropAudio, t) {
   if (useGpu) gpu.present(drawLast);
   else { ex.n64_vi_render(); if (drawLast) drawSoftware(); }
+  if (drawLast && inputStamp) { inputTimes.push(performance.now() - inputStamp); if (inputTimes.length > 512) inputTimes.shift(); inputStamp = 0; }
   const dt = performance.now() - t;
   frameTimes.push(dt); if (frameTimes.length > 512) frameTimes.shift();
   perf.emu += dt; perf.frames++; if (dt > perf.peak) perf.peak = dt;
@@ -1304,7 +1309,7 @@ function timingSummary(samples) {
   return { count: s.length, median: pick(0.5), p95: pick(0.95), p99: pick(0.99), max: s.at(-1) };
 }
 function diagnostics() {
-  return { version: 1, build: wasmHash.toString(16), at: new Date().toISOString(), browser: navigator.userAgent || '', origin: location.protocol || '', renderer: useGpu ? 'webgpu' : 'software', failed: rendererFailed, gpu: gpu?.diagnostics?.() || null, wasmBytes: ex?.memory.buffer.byteLength || 0, romBytes: romSize, audio: { ready: audioReady, state: actx?.state || 'absent', rate: actx?.sampleRate || 0, ...(aLocal ? { underruns: aLocal.underruns, overruns: aLocal.overruns, queued: aLocal.wr-aLocal.rd } : audioStats) }, controllers: padSlots, performance: { ...perf, fieldTimeMs: timingSummary(frameTimes), queueCompletionMs: timingSummary(gpu?.queueSamples || []) }, storage: navigator.locks ? 'exclusive cartridge writer' : 'temporary battery writes' };
+  return { version: 1, build: wasmHash.toString(16), source: typeof SOURCE_META === 'undefined' ? null : SOURCE_META, cartridge: rom ? { digest: rom.key, region: rom.region, revision: rom.revision, saveType: rom.saveType } : null, at: new Date().toISOString(), browser: navigator.userAgent || '', origin: location.protocol || '', renderer: useGpu ? 'webgpu' : 'software', failed: rendererFailed, gpu: gpu?.diagnostics?.() || null, wasmBytes: ex?.memory.buffer.byteLength || 0, romBytes: romSize, audio: { ready: audioReady, state: actx?.state || 'absent', rate: actx?.sampleRate || 0, ...(aLocal ? { underruns: aLocal.underruns, overruns: aLocal.overruns, queued: aLocal.wr-aLocal.rd } : audioStats) }, controllers: padSlots, performance: { ...perf, fieldTimeMs: timingSummary(frameTimes), inputEventToPresentationSubmitMs: timingSummary(inputTimes), inputTimingScope: 'Keyboard/touch event delivery to next presentation submission; excludes browser scheduling before event delivery and physical scanout', queueCompletionMs: timingSummary(gpu?.queueSamples || []) }, storage: navigator.locks ? 'exclusive cartridge writer' : 'temporary battery writes' };
 }
 function downloadBytes(bytes, name, type = 'application/octet-stream') {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
@@ -1312,7 +1317,7 @@ function downloadBytes(bytes, name, type = 'application/octet-stream') {
 // Portable envelopes bind payloads to exact cartridge and core identities.
 // Legacy raw battery files remain accepted; raw machine states are build-specific.
 function packPortable(kind, bytes, extra = {}) {
-  const meta = new TextEncoder().encode(JSON.stringify({ version: 1, kind, cartridge: rom.key, build: wasmHash, ...extra }));
+  const meta = new TextEncoder().encode(JSON.stringify({ version: 1, kind, cartridge: rom.key, build: typeof SOURCE_META === 'undefined' ? wasmHash : SOURCE_META.wasm_sha256, ...extra }));
   const out = new Uint8Array(8 + meta.length + bytes.length), view = new DataView(out.buffer);
   view.setUint32(0, 0x50363450); view.setUint32(4, meta.length); out.set(meta, 8); out.set(bytes, 8 + meta.length); return out;
 }
@@ -1322,7 +1327,7 @@ function unpackPortable(bytes, kind) {
   if (view.getUint32(0) !== 0x50363450 || n > 4096 || 8 + n > bytes.length) throw new Error('Invalid portable file');
   const meta = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8+n)));
   if (meta.version !== 1 || meta.kind !== kind || meta.cartridge !== rom?.key) throw new Error('This file belongs to a different cartridge');
-  if (kind === 'state' && meta.build !== wasmHash) throw new Error('This state requires the same Photon64 core build');
+  if (kind === 'state' && meta.build !== (typeof SOURCE_META === 'undefined' ? wasmHash : SOURCE_META.wasm_sha256)) throw new Error('This state requires the same Photon64 core build');
   return { meta, bytes: bytes.slice(8+n) };
 }
 async function exportPortableState() {

@@ -16,8 +16,11 @@ try {
   await page.setInputFiles('#file', 'testroms/RSPCP2VRCP.N64'); await page.waitForFunction(() => !!window.__photon.rom);
   await page.waitForFunction(() => new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[21], 8)[0] > 2);
   await page.locator('#b-menu').click();
+  await page.waitForFunction(() => window.__photon.diagnostics().audio.ready, null, { timeout: 15000 });
   const saved = await page.evaluate(async () => { const p = window.__photon; new Uint8Array(p.ex.memory.buffer)[p.hi[12]] = 90; new Uint32Array(p.ex.memory.buffer)[p.hi[16] >> 2] = 1; await p.flushSaves(); return p.diagnostics(); });
   report.diagnostics = saved; report.checks.push('standalone core runs without HTTP or external resources', 'production File import', 'pause and battery write');
+  report.checks.push('audio output initialized after a user gesture');
+  report.gpu = saved.gpu ? { outcome: 'AVAILABLE', adapter: saved.gpu.adapter, reason: 'Software core exercised; standalone GPU presentation is not claimed by this smoke test.' } : { outcome: 'SKIP', reason: 'No accepted physical WebGPU adapter on this runner.' };
   await page.reload(); await page.waitForFunction(() => !!window.__photon?.ex);
   // File-origin storage is implementation-defined; report temporary policy explicitly.
   const cached = await page.locator('#lib .cart-play').count();

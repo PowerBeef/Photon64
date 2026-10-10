@@ -16,12 +16,14 @@ const strip = src => src.split('\n').map(l => {  // cut // comments, but never i
 const wasmPath = path.join(root, 'out/n64.wasm');
 if (!fs.existsSync(wasmPath)) throw new Error('out/n64.wasm is missing — run ./build_wasm.sh first');
 const wasm = fs.readFileSync(wasmPath).toString('base64');
+const sourceMeta = { revision: execFileSync('git', ['rev-parse','HEAD'], { cwd: root, encoding: 'utf8' }).trim(), dirty: !!execFileSync('git', ['status','--porcelain'], { cwd: root, encoding: 'utf8' }).trim(), wasm_sha256: crypto.createHash('sha256').update(fs.readFileSync(wasmPath)).digest('hex') };
 const shaders = {};
 for (const n of ['rdp', 'vi', 'merge']) shaders[n] = strip(rd(`src/web/${n}.wgsl`));
 fs.writeFileSync(path.join(root, 'out/shaders.json'), JSON.stringify(shaders));
 const js = `(() => {
 'use strict';
 const WASM_B64 = "${wasm}";
+const SOURCE_META = ${JSON.stringify(sourceMeta)};
 const SHADERS = ${JSON.stringify(shaders)};
 const BRAND_SVG = ${JSON.stringify(rd('assets/logo-on-dark.svg').trim().replace('role="img" aria-label="Photon64"', 'aria-hidden="true" focusable="false"'))};
 ${rd('src/web/gpu.js')}

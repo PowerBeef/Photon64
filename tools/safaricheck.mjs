@@ -24,7 +24,7 @@ function checkpoint() { fs.writeFileSync(path.join(evidence, 'result.json'), JSO
 function mark(label) { phase = label; report.phase = label; checkpoint(); }
 
 async function command(method, endpoint, body) {
-  const item = { phase, method, endpoint, script: body?.script?.slice(0, 160), started: new Date().toISOString() };
+  const item = { phase, method, endpoint, script: typeof body?.script === 'string' ? body.script.slice(0, 160) : undefined, started: new Date().toISOString() };
   report.journal.push(item); checkpoint();
   try {
   const res = await fetch(`http://127.0.0.1:${port}${endpoint}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(diagnostic ? 2500 : Math.max(1, Math.min(20000, deadline - Date.now()))) });

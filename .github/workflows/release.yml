@@ -2,7 +2,7 @@ name: Publish validated release
 on:
   push:
     branches: [main]
-    paths: ['.github/release.json', '.github/workflows/release.yml']
+    paths: ['.github/release.json']
   workflow_dispatch:
 permissions:
   contents: read
