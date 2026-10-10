@@ -1,0 +1,67 @@
+[
+  {
+    "case": "reset-before-save",
+    "dirty": 0,
+    "memory": 165,
+    "persisted": false
+  },
+  {
+    "case": "state-battery-rewind",
+    "restored": true,
+    "memory": 17,
+    "persisted": 34,
+    "dirty": 0
+  },
+  {
+    "case": "rom-content-collision",
+    "sameKey": true,
+    "libraryEntries": 1,
+    "activeByte": 171,
+    "cachedByte": 0
+  },
+  {
+    "case": "file-selection-order",
+    "lastSelected": "second",
+    "finalActive": "first"
+  },
+  {
+    "case": "gpu-wrapped-range",
+    "chunks": [
+      [
+        4194302,
+        2
+      ]
+    ],
+    "touched": [
+      [
+        4194302,
+        2
+      ]
+    ],
+    "expected": [
+      [
+        4194302,
+        2
+      ],
+      [
+        0,
+        2
+      ]
+    ]
+  },
+  {
+    "case": "obsolete-scale-failure",
+    "calls": [
+      1,
+      2,
+      0
+    ],
+    "finalDesired": 0,
+    "setting": 0
+  },
+  {
+    "case": "partial-gpu-build-cleanup",
+    "allocated": 4,
+    "destroyed": 0
+  }
+]

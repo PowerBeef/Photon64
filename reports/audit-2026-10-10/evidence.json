@@ -1,0 +1,61 @@
+{
+  "audited_commit": "96a7f073dffaa8cf002b3e5bb83f20ce37da66d3",
+  "date": "2026-10-10",
+  "validation_run": 38081746008,
+  "conclusion": "failure",
+  "jobs": [
+    {
+      "id": 114299908831,
+      "name": "baseline",
+      "conclusion": "success"
+    },
+    {
+      "id": 114300299589,
+      "name": "safari",
+      "conclusion": "failure"
+    },
+    {
+      "id": 114300299636,
+      "name": "browser (ubuntu-24.04, chromium, 1)",
+      "conclusion": "success"
+    },
+    {
+      "id": 114300299648,
+      "name": "browser (ubuntu-24.04, chromium, chrome, 0)",
+      "conclusion": "success"
+    },
+    {
+      "id": 114300299665,
+      "name": "browser (macos-15, webkit, 0)",
+      "conclusion": "success"
+    },
+    {
+      "id": 114300299670,
+      "name": "browser (ubuntu-24.04, chromium, msedge, 0)",
+      "conclusion": "success"
+    },
+    {
+      "id": 114300299682,
+      "name": "browser (macos-15, webkit, 1)",
+      "conclusion": "success"
+    },
+    {
+      "id": 114300299703,
+      "name": "browser (ubuntu-24.04, chromium, 0)",
+      "conclusion": "success"
+    }
+  ],
+  "safari_observation": "Narrow and landscape PASS; desktop later stalls; TimeoutError; failureState null. Native OS-backed file read SKIP (NotReadableError). Cause not established.",
+  "local_checks": {
+    "node_tests": 42,
+    "node_pass": 42,
+    "legacy_js_checks": 15
+  },
+  "memory": {
+    "wasm_bytes": 155821,
+    "html_bytes": 434733,
+    "initial_wasm_bytes": 58982400,
+    "static_state_bytes": 58940224,
+    "after_rom_reserve_bytes": 134479872
+  }
+}

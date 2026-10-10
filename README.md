@@ -217,6 +217,7 @@ For code changes, follow [AGENTS.md](AGENTS.md), run the checks appropriate to t
 
 | Document | Use it for |
 |---|---|
+| [Remaining-defect audit (10 October 2026)](reports/audit-2026-10-10/REPORT.md) · [PDF](reports/audit-2026-10-10/Photon64_Audit_2026-10-10.pdf) | Current findings, reproducible probes, and the next implementation sequence. |
 | [Development guide](DEVELOPMENT.md) | Setup, commands, profiling, and reproduction. |
 | [Validation report](VALIDATION_REPORT.md) | Executed results and their limits. |
 | [Implementation plan](IMPLEMENTATION_PLAN.md) | Priorities and acceptance criteria. |

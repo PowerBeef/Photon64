@@ -1,5 +1,7 @@
 # Photon64 implementation plan
 
+The [10 October remaining-defect audit](reports/audit-2026-10-10/REPORT.md) contains the newer, code-grounded implementation sequence for source `96a7f07`, including save integrity, GPU lifecycle, CPU faults, and current CI gaps. The milestone history below is retained with its original scope.
+
 Initial source: `ab28c09f4b059239c6467cabbe683701cc86ce4b`, matching the attached 9 October audit. Status incorporates the five-area implementation published at `8146e70`, its hosted browser follow-up at `b2d0455`, and the renderer implementation at `d741f41` with passing hosted baseline/browser validation. Work follows the repository's main-only policy. Priorities are grounded in executable source and measured results.
 
 | Stage | Work | Acceptance | Status |

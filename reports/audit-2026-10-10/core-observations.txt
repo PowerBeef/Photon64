@@ -1,0 +1,7 @@
+load opcode=26 cause=2 BadVAddr=00004000 expected=00004003
+load opcode=27 cause=2 BadVAddr=00004000 expected=00004003
+load opcode=34 cause=2 BadVAddr=00004000 expected=00004003
+load opcode=38 cause=2 BadVAddr=00004000 expected=00004003
+user kernel read: cause=0 value=12345678 (expected AdEL)
+wrapped render range: endStale=1 startStale=0 (expected both 1)
+reset: dirty=0 battery=a5 (dirty must survive or commit first)
