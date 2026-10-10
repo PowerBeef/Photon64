@@ -79,6 +79,8 @@ npm run bench -- "roms/Super Mario 64 (USA).z64" \
 
 Use `--frames 3300 --warmup 2800 --inputs tools/inputs/mk64.txt` for Mario Kart, `4600/4000/ge.txt` for GoldenEye, and `6500/5700/pd.txt` for Perfect Dark. These scripts replay a bounded scenario; they do not establish whole-game compatibility. Missing scripts for Smash and World Driver remain a coverage gap.
 
+The original Mario script finishes at the castle tutorial dialog. `tools/inputs/sm64-play.txt` extends it with the observed dialog dismissal, run and jump. Use `--frames 4488 --warmup 4298 --inputs tools/inputs/sm64-play.txt` to measure that short active movement segment rather than the tutorial scene.
+
 For named V8 profiles, preserve WASM function names in a separate optimized build, then use `--profile`. The profiled replay is separate from benchmark repeats and must produce the same final hashes. Its profile covers the entire process including boot and warmup; timing statistics exclude warmup. Open `replay.cpuprofile` in a CPU-profile viewer.
 
 ```sh

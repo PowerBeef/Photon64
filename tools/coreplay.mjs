@@ -67,3 +67,5 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     console.log(JSON.stringify({ ok: true, ...result }));
   } catch (error) { console.log(JSON.stringify({ ok: false, error: error.message })); }
 }
+// A terminal can remain open after "quit"; release stdin instead of waiting for EOF.
+process.stdin.destroy();

@@ -73,3 +73,28 @@ Local browser execution remains blocked: the environment's approval policy rejec
 The GitHub plugin published commits with new commit metadata and therefore new SHAs, while all four uploaded file-tree SHAs matched their validated local counterparts exactly. The earlier handoff and local manifests retain their original snapshot identities; this CI follow-up identifies the actual published revision independently. No commercial ROM was uploaded for CI.
 
 Use `IMPLEMENTATION_PLAN.md` for the next source changes, `DEVELOPMENT.md` for commands, and the generated handoff for logs and reviewable patches. This milestone protects progress and makes regression verdicts meaningful; existing accuracy discrepancies remain release blockers.
+# Playtest and diagnostic tooling follow-up
+
+The tooling published at `7bed8ea0482616dc7f459b13cc1531ccb67e2765` adds persistent software-core control (`coreplay.mjs`), repeatable core+VI benchmarks (`benchmark.mjs`), named WASM CPU profiles and browser trace/profile capture. The optimized symbolized WASM was checked section by section against the production binary: all non-custom sections match. Symbol names change metadata, not executable code/data.
+
+## Executed capability checks
+
+| Lane | Evidence | Limit |
+|---|---|---|
+| Local live core play | Super Mario 64 replay to field 4200; observed tutorial pages dismissed with A; analog movement and jump observed through PNGs at fields 4418/4428/4488 | Software core; excludes frontend and physical input devices |
+| Reproducible scene benchmark | Three fresh-process 4200-field Mario replays; measured fields 3800–4199; mean 26.279, 27.843, 27.116 ms/field; identical final counters and RDRAM/audio/VI hashes | Castle/tutorial scene, not whole-game FPS; shared AMD EPYC 9V74 host, Node 24.19 |
+| Active movement benchmark | Extended `sm64-play.txt` replay to field 4488, measured fields 4298–4487: 23.916 and 23.682 ms/field; p95 30.396/30.041 ms, p99 35.353/37.356 ms; both final states/images/audio agree | Short 190-field run/jump segment, software rendering; not a full-game performance average |
+| Separate named CPU profile | Fourth replay agrees with benchmark final hashes; sampled self time: `rdp_flush` 46.9%, `n64_vi_render` 18.3%, `sample_texture` 10.9%, `rsp_run_n` 8.7% | Whole process, including boot/warmup; not just the timed scene; profile overhead excluded from benchmark repeats |
+| Local WebGPU | Dawn/lavapipe Mario Kart 300-field probe with exact checkpoints 250/299 and event trace: PASS | Software Vulkan adapter; existing last-target/counter coverage, not physical GPU performance |
+| Native image/audio capture | Mario 4200 fields; 70 PNGs, one-image-per-second silent preview and 2,203,424 stereo PCM frames | Diagnostic capture, not a browser pacing/audio-device test; WAV declares the final DAC rate (32,006 Hz) |
+| Hosted desktop browser | Keyboard/menu pause-resume, 120-field progression, duplicate state saves, restore, battery persistence and cached reload: PASS; no page errors | Homebrew fixture, software renderer |
+| Hosted mobile-emulated browser | Same checks: PASS; no page errors | Chromium viewport/touch emulation; not Safari, iOS or Android hardware |
+| Required baseline | Local `npm run validate`: PASS; hosted validation step: PASS | Independent reference-image gate still fails |
+
+[Actions run 38017435939](https://github.com/PowerBeef/Photon64/actions/runs/38017435939) tested `7bed8ea`. Desktop job `114110740293` and mobile-emulated job `114110740234` both succeeded and uploaded traces, profiles, screenshots and result JSON. Their paced samples were approximately 60.4 and 60.1 fields/s respectively, with tracing/profiling enabled; these are fixture pacing observations, not peak emulator throughput. The desktop benchmark fixture also passed two-run determinism. The baseline job's `npm run validate` step passed, but the separate shipped reference-image comparison failed, so the overall workflow remains failing. Browser logs report no available GPU adapters; browser rendering was explicitly software.
+
+The local npm suite at `7bed8ea` has 15 legacy checks plus 35 Node test cases. Four added cases cover controller script validation, timing summaries, and an actual-WASM persistent session with invalid-command rejection and PNG decoding. A subsequent terminal-only fix releases stdin on `quit`, with a fifth regression case for callers that keep stdin open; focused tests and a live terminal exit check passed. The next broader CI run is separate evidence from the completed run above.
+
+## Environment boundary
+
+Playwright MCP 0.0.83 is installed and its protocol initialization/tool listing was verified. It is not attached to this chat's tool registry. The managed browser cannot reach the workspace's loopback server and explicitly rejects `file:` navigation. Local Chromium execution remains subject to the existing outside-sandbox requirement. These restrictions were not changed. The working development arrangement is local interactive core/native/Dawn diagnostics plus an independent hosted browser runner. No physical GPU/controller, real mobile browser, speaker latency or whole-game compatibility claim follows from these results.

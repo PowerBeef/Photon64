@@ -4,7 +4,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+test('quit exits even while the caller keeps stdin open', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'photon-coreplay-quit-'));
+  const child = spawn(process.execPath, ['tools/coreplay.mjs', 'testroms/RSPCP2VRCP.N64', directory], { stdio: ['pipe', 'ignore', 'pipe'] });
+  try {
+    const status = await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => { child.kill(); reject(new Error('quit waited for stdin EOF')); }, 5000);
+      child.once('error', error => { clearTimeout(timeout); reject(error); });
+      child.once('exit', code => { clearTimeout(timeout); resolve(code); });
+      child.stdin.write('{"op":"quit"}\n');
+    });
+    assert.equal(status, 0);
+  } finally { child.stdin.destroy(); fs.rmSync(directory, { recursive: true, force: true }); }
+});
 test('interactive core preserves a live machine, rejects invalid steps, and captures its VI', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'photon-coreplay-'));
   try {
