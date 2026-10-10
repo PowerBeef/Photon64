@@ -1,4 +1,4 @@
-![Photon64 — a Nintendo 64 emulator for the browser](assets/banner.png)
+![Photon64 — a Nintendo 64 emulator for the browser](assets/banner.svg)
 
 <p align="center">
   <strong>Your cartridges. Your browser. One HTML file.</strong>
