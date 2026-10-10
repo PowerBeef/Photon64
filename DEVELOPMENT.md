@@ -86,6 +86,8 @@ CHROME_EXECUTABLE="$PWD/.tools/chrome/chrome-linux64/chrome" node tools/browserc
 
 `tools/responsivecheck.mjs` visits 15 viewport/DPR configurations, measures actual control reachability and canvas proportions, and exercises menus, rotation, safe-area spacing and keyboard/touch navigation. `tools/safaricheck.mjs` runs shared geometry assertions and real clicks/keys through Apple's native macOS Safari driver. See [UI_COMPATIBILITY.md](UI_COMPATIBILITY.md) for evidence, reproduction commands and remaining hardware checks.
 
+The expanded matrix passes in [Actions run 38074459992](https://github.com/PowerBeef/Photon64/actions/runs/38074459992). Native Safari's independent OS-backed File probe fails before the app participates; that capability is SKIP, and its UI lane imports a browser-backed File instead. This distinction is retained in artifacts and the review. Physical mobile devices and the native OS chooser remain manual checks.
+
 Local execution remains blocked: `AGENTS.md` requires outside-sandbox execution and this environment rejected escalation. Installing Chromium or Playwright MCP does not remove that limitation. The managed cloud browser is in a separate network namespace (workspace localhost is unreachable), and its policy rejects `file:` URLs. Do not tunnel or change host policy to work around those boundaries. The independent browser job passed its original shipped-fixture checks in [Actions run 38016280375](https://github.com/PowerBeef/Photon64/actions/runs/38016280375); expanded checks have separate run evidence. That hosted result does not establish local-browser, physical-GPU or commercial-game coverage.
 
 ## Gameplay benchmarks and debugging
