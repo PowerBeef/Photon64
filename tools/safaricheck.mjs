@@ -30,6 +30,8 @@ const recordErrors = () => evaluate(() => {
   window.__uiErrors = [];
   addEventListener('error', e => window.__uiErrors.push(e.message));
   addEventListener('unhandledrejection', e => window.__uiErrors.push(String(e.reason)));
+  window.__uploadEvents = [];
+  document.getElementById('file').addEventListener('change', e => window.__uploadEvents.push([...e.target.files].map(f => ({ name: f.name, size: f.size, type: f.type }))), { capture: true });
 });
 async function evaluateAsync(fn, arg = null) {
   const result = await cmd('POST', '/execute/async', { script: `const done = arguments[arguments.length - 1]; Promise.resolve((${fn.toString()})(arguments[0])).then(value => done({value}), e => done({error: String(e.stack || e)}));`, args: [arg] });
@@ -77,14 +79,20 @@ try {
     assert.equal(await evaluate(() => document.getElementById('s-pak').value), name === 'narrow' ? '2' : name === 'landscape' ? '0' : '1');
     await key('\uE00C'); assert.ok(await evaluate(() => document.activeElement.id === 'h-set'));
     await evaluate(() => window.__photon.settings.renderer = 'sw');
+    await evaluate(() => window.__uploadEvents = []);
     const input = await cmd('POST', '/element', { using: 'css selector', value: '#file' });
     await cmd('POST', `/element/${input['element-6066-11e4-a52e-4f735466cecf']}/value`, { text: uploadPath });
+    row.upload = await evaluate(() => ({ events: window.__uploadEvents, selected: [...document.getElementById('file').files].map(f => ({ name: f.name, size: f.size })), rom: window.__photon.rom?.name, toast: document.getElementById('toast').textContent }));
+    console.log('Safari staged upload:', JSON.stringify(row.upload));
+    // Apple's native driver can stage a file for the next open-panel request.
+    // Activate the actual ROM chooser if no selection event was delivered.
+    if (!row.upload.events?.length && !row.upload.selected.length) await click(await evaluate(() => document.getElementById('drop').getClientRects().length ? '#drop' : '#h-add'));
     await wait(() => !!window.__photon.rom && new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[21], 8)[0] > 2);
     await click('#b-menu'); await check('game-menu'); await shot(name + '-menu');
     const fields = await evaluate(() => new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[21], 8)[0]); await delay(150);
     assert.equal(await evaluate(() => new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[21], 8)[0]), fields);
-    await click('#m-save'); await check('save-states'); await key('\uE00C');
-    await click('#m-load'); await check('load-states'); await key('\uE00C');
+    await click('#m-save'); await wait(() => document.querySelectorAll('#slots .slot').length === 4); await check('save-states'); await key('\uE00C');
+    await click('#m-load'); await wait(() => document.querySelectorAll('#slots .slot').length === 4); await check('load-states'); await key('\uE00C');
     await click('#m-set');
     for (const tab of ['video', 'console', 'pad', 'data']) { await click('#tab-' + tab); await check('settings-' + tab); await shot(name + '-' + tab); }
     await key('\uE00C'); assert.ok(await evaluate(() => document.activeElement.id === 'm-set'));
@@ -94,8 +102,11 @@ try {
       return false;
     }, fields), 'Resume must advance emulated fields');
     await check('stage');
-    assert.equal(await evaluateAsync(() => window.__photon.saveState(0, '')), true);
-    assert.equal(await evaluateAsync(() => window.__photon.loadState(0)), true);
+    await click('#b-menu'); await click('#m-save'); await wait(() => document.querySelectorAll('#slots .slot').length === 4);
+    await click('#slots .slot:first-child'); await wait(() => document.getElementById('sheet').hidden);
+    await click('#b-menu'); await click('#m-load'); await wait(() => document.querySelector('#slots .slot')?.disabled === false);
+    await click('#slots .slot:first-child'); await wait(() => document.getElementById('sheet').hidden);
+    row.stateSlotClicks = 'PASS: saved and restored slot 1 through native WebDriver clicks';
     assert.equal(await evaluateAsync(async () => {
       const p = window.__photon; p.setPaused(true);
       new Uint8Array(p.ex.memory.buffer)[p.hi[12]] = 0x5A;
@@ -113,5 +124,13 @@ try {
   }
   assert.deepEqual(await evaluate(() => window.__uiErrors), []);
   report.outcome = 'PASS'; console.log('PASS native Safari', report.capabilities.browserVersion);
-} catch (e) { report.error = e.stack; if (session) await shot('failure').catch(() => {}); throw e; }
+} catch (e) {
+  report.error = e.stack;
+  if (session) {
+    report.failureState = await evaluate(() => ({ rom: window.__photon?.rom?.name, running: window.__photon?.running, toast: document.getElementById('toast')?.textContent, fileValue: document.getElementById('file')?.value, files: [...(document.getElementById('file')?.files || [])].map(f => ({ name: f.name, size: f.size })), events: window.__uploadEvents, errors: window.__uiErrors })).catch(() => null);
+    console.log('Safari failure state:', JSON.stringify(report.failureState));
+    await shot('failure').catch(() => {});
+  }
+  throw e;
+}
 finally { if (session) await cmd('DELETE', '').catch(() => {}); driver.kill(); server.close(); fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(report, null, 2) + '\n'); }

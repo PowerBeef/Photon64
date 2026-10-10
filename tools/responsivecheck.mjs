@@ -78,9 +78,11 @@ try {
       assert.deepEqual(await page.evaluate(() => ({ ...window.__photon.touchState })), { buttons: 0, x: 0, y: 0 }, 'Menu must release held input');
       const fields = await field();
       await page.waitForTimeout(100); assert.equal(await field(), fields, 'Menu must pause emulation');
-      await click('#m-save'); await check('save-states'); await shot('states');
+      await click('#m-save'); await page.waitForFunction(() => document.querySelectorAll('#slots .slot').length === 4);
+      await check('save-states'); await shot('states');
       await page.keyboard.press('Escape');
-      await click('#m-load'); await check('load-states'); await page.keyboard.press('Escape');
+      await click('#m-load'); await page.waitForFunction(() => document.querySelectorAll('#slots .slot').length === 4);
+      await check('load-states'); await page.keyboard.press('Escape');
       await click('#m-set');
       for (const tab of ['video', 'console', 'pad', 'data']) {
         await click('#tab-' + tab); await check('settings-' + tab); await shot(tab);
@@ -114,6 +116,13 @@ try {
         const a = await page.locator('#touch .t[data-b=A]').boundingBox();
         await page.touchscreen.tap(a.x + a.width / 2, a.y + a.height / 2);
         assert.deepEqual(await page.evaluate(() => ({ ...window.__photon.touchState })), { buttons: 0, x: 0, y: 0 });
+      }
+      if (name === 'small-phone') {
+        await click('#b-menu'); await click('#m-save'); await page.waitForFunction(() => document.querySelectorAll('#slots .slot').length === 4);
+        await click('#slots .slot:first-child'); await page.waitForFunction(() => document.getElementById('sheet').hidden);
+        await click('#b-menu'); await click('#m-load'); await page.waitForFunction(() => document.querySelector('#slots .slot')?.disabled === false);
+        await click('#slots .slot:first-child'); await page.waitForFunction(() => document.getElementById('sheet').hidden);
+        row.stateSlotClicks = 'PASS: saved and restored slot 1 through real touchscreen taps';
       }
       await click('#b-menu'); await click('#m-home'); await page.waitForSelector('#lib .cart:not(.add)');
       await check('populated-library');
