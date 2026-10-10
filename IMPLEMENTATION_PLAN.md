@@ -1,6 +1,6 @@
 # Photon64 implementation plan
 
-Initial source: `ab28c09f4b059239c6467cabbe683701cc86ce4b`, matching the attached 9 October audit. Status incorporates the five-area implementation published at `8146e70` and its hosted browser follow-up at `b2d0455`. Work follows the repository's main-only policy. Priorities are grounded in executable source and measured results.
+Initial source: `ab28c09f4b059239c6467cabbe683701cc86ce4b`, matching the attached 9 October audit. Status incorporates the five-area implementation published at `8146e70`, its hosted browser follow-up at `b2d0455`, and the renderer implementation at `d741f41` with passing hosted baseline/browser validation. Work follows the repository's main-only policy. Priorities are grounded in executable source and measured results.
 
 | Stage | Work | Acceptance | Status |
 |---|---|---|---|
@@ -13,7 +13,7 @@ Initial source: `ab28c09f4b059239c6467cabbe683701cc86ce4b`, matching the attache
 | 2: FPU | F06: portable bit-exact arithmetic, directed rounding and exception wrapper | Exact rational/isqrt vectors for four rounding modes, NaNs/subnormals/conversions/traps in native/WASM | Implemented with SoftFloat 3e and 3628 independent vectors; broader hardware conformance remains open |
 | 2: GPU coherence | F08/F09: rejected mappings/submissions cannot acknowledge; cleanup and reset generations; full chunked range scans; fail-stop device loss | Injected map/submit failures, old callbacks, capacity tails; actual backend integration | Implemented; fake-device tests and available adapter probes |
 | 2: Bounded imports | F10: size checks before file reads; counted, cancelable ZIP/gzip decoding; local/central records and CRC | Oversized file never read; over-budget stream canceled; malformed/CRC inputs rejected | Implemented; focused tests; extended fuzz corpus pending |
-| 3: Repeatable development | F11/F12: pinned SDK digest and oracle revision, portable native build, Node/npm/Python versions, validation script and CI | Rebuild with documented commands; required lanes fail when unavailable; record fixture/artifact hashes | Implemented; local and hosted baseline/browser evidence recorded; reference-image gate remains failing |
+| 3: Repeatable development | F11/F12: pinned SDK digest and oracle revision, portable native build, Node/npm/Python versions, validation script and CI | Rebuild with documented commands; required lanes fail when unavailable; record fixture/artifact hashes | Implemented; local and hosted baseline/browser checks pass; exact raw and independent VI gates required, legacy mixed-stage failures retained as a diagnostic |
 | 3: Provenance | F13: align MIT metadata, document external formulation and homebrew fixtures; bundle/source hashes | License manifest agrees; commercial ROMs remain local | Implemented documentation; upstream fixture license chain still requires verification |
 | 4: Compatibility and performance | Device/browser matrix, save reload/device loss, recorded commercial inputs, accuracy comparisons, audio/controller/mobile tests, memory/frame pacing | Named workload and device evidence for each support claim | Open; headless smoke evidence alone is insufficient |
 
@@ -49,4 +49,4 @@ Items 1–5 from the accuracy investigation are implemented; see `RENDERER_ACCUR
 
 ## Renderer accuracy follow-up
 
-Implemented signed 16-bit saturation between the 17-bit perspective divider and tile coordinate shifts in C/WGSL. LOD retains the wider coordinates. Independent coordinate vectors and guest-store/DMA synchronization tests run in the required native build. The reference adapter observes CPU-owned hidden bits as well as command order; old stale-memory depth counts are superseded. Exact 1x HD comparisons now reject reduced diagnostic storage, which aliases addresses. `VALIDATION_REPORT.md` records same-harness before/after counts and the remaining failures.
+Implemented signed 16-bit saturation between the 17-bit perspective divider and tile coordinate shifts in C/WGSL. LOD retains the wider coordinates. Independent coordinate vectors and guest-store/DMA synchronization tests run in the required native build. The reference adapter observes CPU-owned hidden bits as well as command order; old stale-memory depth counts are superseded. Exact 1x HD comparisons now reject reduced diagnostic storage, which aliases addresses. The later ordered-feedback/keying implementation closes the counted differences in all five native recorded replays; `VALIDATION_REPORT.md` preserves before/after evidence and the remaining conformance limits.
