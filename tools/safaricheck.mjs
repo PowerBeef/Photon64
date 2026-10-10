@@ -24,6 +24,11 @@ async function command(method, endpoint, body) {
 }
 const cmd = (method, endpoint, body) => command(method, `/session/${session}${endpoint}`, body);
 const evaluate = (fn, arg = null) => cmd('POST', '/execute/sync', { script: `return (${fn.toString()})(arguments[0]);`, args: [arg] });
+const recordErrors = () => evaluate(() => {
+  window.__uiErrors = [];
+  addEventListener('error', e => window.__uiErrors.push(e.message));
+  addEventListener('unhandledrejection', e => window.__uiErrors.push(String(e.reason)));
+});
 async function evaluateAsync(fn, arg = null) {
   const result = await cmd('POST', '/execute/async', { script: `const done = arguments[arguments.length - 1]; Promise.resolve((${fn.toString()})(arguments[0])).then(value => done({value}), e => done({error: String(e.stack || e)}));`, args: [arg] });
   if (result.error) throw Error(result.error); return result.value;
@@ -55,6 +60,7 @@ try {
   await cmd('POST', '/timeouts', { script: 30000, pageLoad: 60000, implicit: 0 });
   await cmd('POST', '/url', { url: `http://127.0.0.1:${server.address().port}` });
   await wait(() => !!window.__photon?.ex);
+  await recordErrors();
   for (const [name, width, height] of [['narrow', 390, 844], ['landscape', 1000, 500], ['desktop', 1000, 740]]) {
     await cmd('POST', '/window/rect', { x: 0, y: 0, width, height }); await delay(500);
     const row = { name, requestedWindow: [width, height], phases: [] }; report.cases.push(row);
@@ -63,6 +69,10 @@ try {
     await evaluate(() => document.querySelector('#pg-settings [data-nav=back]').focus());
     await key('\uE004', true); assert.ok(await evaluate(() => document.getElementById('sheet').contains(document.activeElement)));
     await key('\uE004'); assert.ok(await evaluate(() => document.activeElement.matches('#pg-settings [data-nav=back]')));
+    await evaluate(() => document.getElementById('tab-video').focus()); await key('\uE014');
+    assert.equal(await evaluate(() => document.getElementById('tab-console').getAttribute('aria-selected')), 'true');
+    await evaluate(() => document.querySelector('#s-pak + .seg [aria-checked=true]').focus()); await key('\uE014');
+    assert.equal(await evaluate(() => document.getElementById('s-pak').value), name === 'narrow' ? '2' : name === 'landscape' ? '0' : '1');
     await key('\uE00C'); assert.ok(await evaluate(() => document.activeElement.id === 'h-set'));
     await evaluateAsync(async b64 => { const p = window.__photon; p.settings.renderer = 'sw'; await p.loadRom(Uint8Array.from(atob(b64), c => c.charCodeAt(0)), 'Safari homebrew with a deliberately long title.N64'); }, rom);
     await wait(() => window.__photon.perf.frames > 2);
@@ -83,7 +93,8 @@ try {
       new Uint32Array(p.ex.memory.buffer)[p.hi[16] >> 2] = 1; return p.flushSaves();
     }), true);
     await click('#b-menu'); await click('#m-home'); await wait(() => !!document.querySelector('#lib .cart:not(.add)'));
-    await cmd('POST', '/refresh', {}); await wait(() => !!window.__photon?.ex && !!document.querySelector('#lib .cart:not(.add)'));
+    assert.deepEqual(await evaluate(() => window.__uiErrors), []);
+    await cmd('POST', '/refresh', {}); await wait(() => !!window.__photon?.ex && !!document.querySelector('#lib .cart:not(.add)')); await recordErrors();
     await evaluate(() => window.__photon.settings.renderer = 'sw'); await click('#lib .cart:not(.add)');
     await wait(() => !!window.__photon.rom);
     assert.equal(await evaluate(() => new Uint8Array(window.__photon.ex.memory.buffer)[window.__photon.hi[12]]), 0x5A);
@@ -91,6 +102,7 @@ try {
     await check('cached-library');
     console.log('PASS native Safari', name, JSON.stringify(row.phases[0].viewport));
   }
+  assert.deepEqual(await evaluate(() => window.__uiErrors), []);
   report.outcome = 'PASS'; console.log('PASS native Safari', report.capabilities.browserVersion);
 } catch (e) { report.error = e.stack; if (session) await shot('failure').catch(() => {}); throw e; }
 finally { if (session) await cmd('DELETE', '').catch(() => {}); driver.kill(); server.close(); fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(report, null, 2) + '\n'); }

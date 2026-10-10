@@ -1033,10 +1033,12 @@ function showPage(page, focus) {
   }
   focusSheet(focus);
 }
-function openSheet(page) {
-  if (sheetOpen()) sheetStack.push({ page: sheetPage, focus: document.activeElement });
+function openSheet(page, opener = document.activeElement) {
+  // Safari does not necessarily focus a clicked button. Keep its explicit trigger
+  // rather than relying on activeElement when restoring navigation focus.
+  if (sheetOpen()) sheetStack.push({ page: sheetPage, focus: opener });
   else {
-    sheetOpener = document.activeElement;
+    sheetOpener = opener;
     sheetStack = []; $('sheet').hidden = false;
     $('home').inert = $('stage').inert = true; releaseInput();
     if (rom) { resumeOnClose = !paused; togglePause(true); }      // the game waits while the sheet is up
@@ -1069,9 +1071,9 @@ function updateMenuTiles() {
   m.firstChild.innerHTML = UiArt.icon(settings.mute ? 'mute' : 'sound'); m.lastChild.textContent = settings.mute ? 'Sound off' : 'Sound on';
   m.classList.toggle('on', !!settings.mute); $('m-ff').classList.toggle('on', ffLock);
 }
-async function openMenu() {
+async function openMenu(opener = $('b-menu')) {
   if (!rom || sheetOpen()) return;
-  openSheet('menu');
+  openSheet('menu', opener);
   $('m-title').textContent = rom.name;
   $('m-sub').textContent = `${['', 'EEPROM save', 'EEPROM save', 'SRAM save', 'Flash save'][rom.saveType] || ''} · ${useGpu ? 'WebGPU' + (gpu.scaleLog2 ? ` ${1 << gpu.scaleLog2}×` : '') : 'Software'}`;
   $('m-thumb').src = menuThumb || BLANK;
@@ -1097,12 +1099,12 @@ function ago(t) {
   if (m < 1) return 'Just now'; if (m < 60) return `${m} min ago`; if (m < 1440) return `${Math.round(m / 60)} h ago`;
   return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
-async function openStates(mode) {
+async function openStates(mode, opener) {
   statesMode = mode;
   $('st-title').textContent = mode === 'save' ? 'Save state' : 'Load state';
   $('st-hint').textContent = (mode === 'save' ? 'Saving replaces what is in the slot.' : 'Loading replaces the game in progress.') + (isTouch ? '' : mode === 'save' ? ' F2 saves to slot 1 at any time.' : ' F4 loads slot 1 at any time.');
   const host = $('slots'); host.textContent = '';
-  openSheet('states');
+  openSheet('states', opener);
   const r = rom;
   let meta; try { meta = await stateMeta(r); } catch (e) { toast('Could not read state slots'); return; }
   if (rom !== r) return;
@@ -1205,14 +1207,14 @@ function initUI() {
   for (const ev of ['dragenter', 'dragover']) addEventListener(ev, e => { e.preventDefault(); over(true); });
   for (const ev of ['dragleave', 'drop']) addEventListener(ev, e => { e.preventDefault(); over(false); });
   addEventListener('drop', e => { const f = e.dataTransfer && e.dataTransfer.files[0]; if (f) openFile(f); });
-  $('h-set').onclick = () => openSheet('settings');
+  $('h-set').onclick = e => openSheet('settings', e.currentTarget);
 
   // game menu
   $('m-resume').innerHTML = UiArt.icon('play') + 'Resume';
   ic('m-save', 'save'); ic('m-load', 'load'); ic('m-ff', 'ff'); ic('m-mute', 'sound'); ic('m-full', 'full'); ic('m-set', 'gear'); ic('m-reset', 'reset'); ic('m-home', 'library');
-  $('b-menu').onclick = openMenu;
+  $('b-menu').onclick = e => openMenu(e.currentTarget);
   $('m-resume').onclick = () => closeSheet();
-  $('m-save').onclick = () => openStates('save'); $('m-load').onclick = () => openStates('load');
+  $('m-save').onclick = e => openStates('save', e.currentTarget); $('m-load').onclick = e => openStates('load', e.currentTarget);
   $('m-ff').onclick = () => { ffLock = !ffLock; if (!ffLock) audioReset(); closeSheet(); };
   $('m-mute').onclick = () => { settings.mute = !settings.mute; saveSettings(); setVolume(); };
   const fsEl = document.documentElement;
@@ -1223,7 +1225,7 @@ function initUI() {
     try { if (fullscreenElement()) await exitFullscreen(); else await requestFull.call(fsEl); closeSheet(); }
     catch (e) { toast('Full screen is unavailable in this browser or window', 3000); }
   };
-  $('m-set').onclick = () => openSheet('settings');
+  $('m-set').onclick = e => openSheet('settings', e.currentTarget);
   $('m-reset').onclick = () => confirmTap($('m-reset'), $('m-reset').lastChild, 'Tap to reset', resetGame);
   $('m-home').onclick = goHome;
   $('sheet').querySelector('.scrim').onclick = () => closeSheet();

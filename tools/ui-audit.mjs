@@ -18,7 +18,7 @@ export async function auditUi() {
   for (const e of [root, ...root.querySelectorAll('.pg, .pg-b, .tabs, .seg, #lib, #binds')].filter(visible)) {
     if (e.scrollWidth > e.clientWidth + epsilon) errors.push(name(e) + ' overflows horizontally');
   }
-  const controls = [...root.querySelectorAll('button, input, summary, [role="button"]')].filter(e => visible(e) && !e.disabled);
+  const controls = [...root.querySelectorAll('button, input, summary, [role="button"]')].filter(visible);
   for (const e of controls) {
     e.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     await new Promise(r => requestAnimationFrame(r));

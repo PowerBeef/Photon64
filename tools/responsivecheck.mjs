@@ -31,6 +31,14 @@ try {
   for (const [name, width, height, deviceScaleFactor, mobile, insets = [0, 0, 0, 0]] of cases) {
     const row = { name, requestedViewport: [width, height], deviceScaleFactor, mobile, insets, phases: [] }; report.cases.push(row);
     const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor, isMobile: mobile, hasTouch: mobile, reducedMotion: 'reduce' });
+    await context.addInitScript(() => {
+      // Install before initUI captures the browser method; activate only for the
+      // denied-request check, leaving normal feature detection intact.
+      for (const key of ['requestFullscreen', 'webkitRequestFullscreen']) {
+        const proto = typeof HTMLElement.prototype[key] === 'function' ? HTMLElement.prototype : Element.prototype, original = proto[key];
+        if (typeof original === 'function') proto[key] = function (...args) { if (window.__denyFullscreen) return Promise.reject(new Error('Injected fullscreen denial')); return original.apply(this, args); };
+      }
+    });
     const page = await context.newPage();
     page.on('pageerror', e => report.errors.push(name + ': ' + e.message));
     const check = async phase => {
@@ -38,7 +46,7 @@ try {
       assert.deepEqual(result.errors, [], name + '/' + phase + ': ' + result.errors.join('; '));
     };
     const click = async selector => { const l = page.locator(selector); await l.scrollIntoViewIfNeeded(); if (mobile) await l.tap(); else await l.click(); };
-    const shot = phase => page.screenshot({ path: path.join(evidence, name + '-' + phase + '.png'), scale: 'css' });
+    const shot = async phase => { await page.mouse.move(-1, -1); return page.screenshot({ path: path.join(evidence, name + '-' + phase + '.png'), scale: 'css' }); };
     try {
       await page.goto(`http://127.0.0.1:${server.address().port}`);
       await page.waitForFunction(() => window.__photon?.ex);
@@ -76,6 +84,15 @@ try {
       for (const tab of ['video', 'console', 'pad', 'data']) {
         await click('#tab-' + tab); await check('settings-' + tab); await shot(tab);
       }
+      if (mobile || name === 'short-window') {
+        await click('#tab-pad'); await click('#s-touch + .seg button:nth-child(2)');
+        for (const [sizeKey, heightKey, dpad] of [['Home', 'Home', false], ['End', 'Home', true], ['End', 'End', false]]) {
+          await page.locator('#s-tsize').focus(); await page.keyboard.press(sizeKey);
+          await page.locator('#s-tlift').focus(); await page.keyboard.press(heightKey);
+          if (await page.locator('#s-dpad').isChecked() !== dpad) await click('#s-dpad');
+          await check('pad-' + sizeKey + '-' + heightKey + '-dpad-' + dpad);
+        }
+      }
       // Rotate/resize with the sheet open, then return through the navigation stack.
       await page.setViewportSize({ width: height, height: width });
       await page.waitForTimeout(400); await check('rotated-settings');
@@ -83,7 +100,7 @@ try {
       await page.keyboard.press('Escape'); assert.ok(await page.locator('#m-set').evaluate(e => e === document.activeElement));
       // A denied fullscreen request keeps recovery controls available.
       if (await page.locator('#m-full').isVisible()) {
-        await page.evaluate(() => { const el = document.documentElement, key = el.requestFullscreen ? 'requestFullscreen' : 'webkitRequestFullscreen'; el[key] = () => Promise.reject(new Error('Injected fullscreen denial')); });
+        await page.evaluate(() => window.__denyFullscreen = true);
         await click('#m-full'); await page.waitForFunction(() => document.getElementById('toast').textContent.includes('Full screen is unavailable'));
         assert.equal(await page.locator('#sheet').isVisible(), true);
       }
