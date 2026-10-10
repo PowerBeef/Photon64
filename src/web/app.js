@@ -577,6 +577,8 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => { keysDown.delete(e.code); if (e.code === settings.keys.FF) { fastForward = false; if (!ffLock) audioReset(); } });
 function releaseInput() {
+  const stage = $('stage');
+  for (const id of pointers.keys()) { try { if (stage.hasPointerCapture(id)) stage.releasePointerCapture(id); } catch (e) { /* pointer already ended */ } }
   keysDown.clear(); fastForward = false; pointers.clear(); stickPid = null; touchUpdate();
   if (ex) ex.n64_input(0, 0, 0, 0);
 }
@@ -811,6 +813,7 @@ function initTouch() {
     audioStart();
     if (!touchEls.length) touchLayout();
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { stage.setPointerCapture(e.pointerId); } catch (e) { /* synthetic pointer or a pointer that already ended */ }
     if ((stickPid === null || !pointers.has(stickPid)) && inStick(e.clientX, e.clientY)) stickPid = e.pointerId;
     touchUpdate(); e.preventDefault();
   };
@@ -915,8 +918,11 @@ function tick(now) {
 }
 function resize() {
   touchLayout();
-  const s = $('screen'), dpr = Math.min(window.devicePixelRatio || 1, 3);
-  const w = Math.max(1, Math.min(4096, Math.round(s.clientWidth * dpr))), h = Math.max(1, Math.min(4096, Math.round(s.clientHeight * dpr)));
+  const s = $('screen');
+  // Reduce both dimensions together: independently clamping a high-DPI or ultrawide
+  // canvas changes the aspect ratio seen by the GPU presentation shader.
+  const dpr = Math.min(window.devicePixelRatio || 1, 3, 4096 / Math.max(1, s.clientWidth), 4096 / Math.max(1, s.clientHeight));
+  const w = Math.max(1, Math.round(s.clientWidth * dpr)), h = Math.max(1, Math.round(s.clientHeight * dpr));
   const cv = $('cv-gpu');
   if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
   // software canvas: letterbox to 4:3 with CSS (its backing store is the raw 640-wide VI field)
@@ -970,17 +976,30 @@ function updatePills() {
 // ---- settings controls. A <select> stays the source of truth; what is shown is a row of buttons made from its options.
 function segSync(sel) {
   const seg = sel._seg; if (!seg) return;
-  [...seg.children].forEach((b, i) => { const o = sel.options[i]; b.classList.toggle('on', o.value === sel.value); b.disabled = sel.disabled || o.disabled; });
+  [...seg.children].forEach((b, i) => { const o = sel.options[i], on = o.value === sel.value;
+    b.classList.toggle('on', on); b.disabled = sel.disabled || o.disabled;
+    b.setAttribute('aria-checked', String(on)); b.tabIndex = on && !b.disabled ? 0 : -1;
+  });
 }
 function enhanceSelect(sel) {
   const seg = document.createElement('div'); seg.className = 'seg'; seg.setAttribute('role', 'radiogroup');
+  const label = sel.parentNode.querySelector('label');
+  if (label) { label.id = sel.id + '-label'; seg.setAttribute('aria-labelledby', label.id); }
   for (const o of sel.options) {
-    const b = document.createElement('button'); b.type = 'button'; b.textContent = o.textContent;
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = o.textContent; b.setAttribute('role', 'radio');
     b.onclick = () => { if (sel.value === o.value) return; sel.value = o.value; sel.dispatchEvent(new Event('change')); segSync(sel); };
     seg.appendChild(b);
   }
   sel.hidden = true; sel._seg = seg; sel.after(seg); segSync(sel);
   sel.addEventListener('change', () => segSync(sel));
+  seg.addEventListener('keydown', e => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return;
+    const buttons = [...seg.children].filter(b => !b.disabled), i = buttons.indexOf(document.activeElement);
+    if (i < 0) return;
+    e.preventDefault();
+    const n = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (i + (['ArrowLeft', 'ArrowUp'].includes(e.key) ? -1 : 1) + buttons.length) % buttons.length;
+    buttons[n].click(); buttons[n].focus();
+  });
 }
 const bound = [];                 // every settings control: how to show the stored value again, and what a change sets off
 function bindSetting(id, key, kind, onchange) {
@@ -994,33 +1013,50 @@ function bindSetting(id, key, kind, onchange) {
 }
 
 // ---- the sheet
-let sheetPage = null, sheetStack = [], menuThumb = '', resumeOnClose = false, statesMode = 'save';
+let sheetPage = null, sheetStack = [], sheetOpener = null, menuThumb = '', resumeOnClose = false, statesMode = 'save';
 const BLANK = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
 function sheetOpen() { return !$('sheet').hidden; }
-function showPage(page) {
+function sheetFocusables() {
+  return [...$('sheet').querySelectorAll('button, input, [tabindex], summary')].filter(e => !e.disabled && e.tabIndex >= 0 && e.getClientRects().length);
+}
+function focusSheet(target) { (target && target.getClientRects().length ? target : sheetFocusables()[0] || $('sheet').querySelector('.panel')).focus(); }
+function showPage(page, focus) {
   sheetPage = page;
   $('s-export').disabled = $('s-import').disabled = !rom;
   for (const p of ['menu', 'states', 'settings']) $('pg-' + p).hidden = p !== page;
   $('sheet').classList.toggle('wide', page === 'settings');
-  for (const b of document.querySelectorAll('#sheet [data-nav=back]')) b.innerHTML = UiArt.icon(sheetStack.length ? 'back' : 'close');
+  const panel = $('sheet').querySelector('.panel');
+  if (page === 'menu') { panel.removeAttribute('aria-labelledby'); panel.setAttribute('aria-label', 'Game menu'); }
+  else { panel.removeAttribute('aria-label'); panel.setAttribute('aria-labelledby', page === 'settings' ? 'set-title' : 'st-title'); }
+  for (const b of document.querySelectorAll('#sheet [data-nav=back]')) {
+    b.innerHTML = UiArt.icon(sheetStack.length ? 'back' : 'close'); b.setAttribute('aria-label', sheetStack.length ? 'Back' : 'Close');
+  }
+  focusSheet(focus);
 }
 function openSheet(page) {
-  if (sheetOpen()) sheetStack.push(sheetPage);
+  if (sheetOpen()) sheetStack.push({ page: sheetPage, focus: document.activeElement });
   else {
+    sheetOpener = document.activeElement;
     sheetStack = []; $('sheet').hidden = false;
+    $('home').inert = $('stage').inert = true; releaseInput();
     if (rom) { resumeOnClose = !paused; togglePause(true); }      // the game waits while the sheet is up
   }
   showPage(page); updateFlag();
 }
-function sheetBack() { if (sheetStack.length) showPage(sheetStack.pop()); else closeSheet(); }
+function sheetBack() { if (sheetStack.length) { const prev = sheetStack.pop(); showPage(prev.page, prev.focus); } else closeSheet(); }
 function closeSheet(stayPaused) {
   if (!sheetOpen()) return;
   $('sheet').hidden = true; sheetStack = [];
+  $('home').inert = $('stage').inert = false;
   if (rebinding) { rebinding = null; buildBinds(); }
   for (const b of document.querySelectorAll('#sheet .sure')) disarm(b);
   if (resumeOnClose) { resumeOnClose = false; if (!stayPaused) togglePause(false); }
   updateFlag(); pokeMenu();
+  const target = sheetOpener && sheetOpener !== document.body && sheetOpener.isConnected && sheetOpener.getClientRects().length ? sheetOpener : $(rom ? 'b-menu' : 'h-set');
+  sheetOpener = null; target.focus({ preventScroll: true });
 }
+function fullscreenElement() { return document.fullscreenElement || document.webkitFullscreenElement; }
+function exitFullscreen() { const exit = document.exitFullscreen || document.webkitExitFullscreen; return exit ? Promise.resolve(exit.call(document)) : Promise.resolve(); }
 // destructive actions ask once more: the first tap arms the button, the second one within a moment does it
 function disarm(b) { clearTimeout(b._t); b.classList.remove('sure'); if (b._label) b._label.textContent = b._text; }
 function confirmTap(b, label, sure, fn) {
@@ -1138,11 +1174,12 @@ async function goHomeNow() {
   romGen++;
   if (actx) actx.suspend().catch(() => {});
   paused = false; ffLock = false; fastForward = false; resumeOnClose = false; menuThumb = '';
-  $('sheet').hidden = true; $('stage').hidden = true; $('home').hidden = false;
+  closeSheet(true); releaseInput(); $('stage').hidden = true; $('home').hidden = false;
   if (settings.keep && rom) { const k = rom.key, list = await libList(), e = list.find(x => x.key === k); if (e) { e.last = Date.now(); await idbSet('lib', list); } }
   rom = null; document.title = 'Photon64';
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (fullscreenElement()) exitFullscreen().catch(() => {});
   updateFlag(); resize(); renderLibrary();
+  $('h-set').focus({ preventScroll: true });
 }
 
 // Everything in Settings back to how it was the first time, the keyboard included. Games, saves and states are not settings.
@@ -1179,22 +1216,46 @@ function initUI() {
   $('m-ff').onclick = () => { ffLock = !ffLock; if (!ffLock) audioReset(); closeSheet(); };
   $('m-mute').onclick = () => { settings.mute = !settings.mute; saveSettings(); setVolume(); };
   const fsEl = document.documentElement;
-  if (!fsEl.requestFullscreen) { $('m-full').hidden = true; $('m-full').parentNode.classList.add('n5'); }
-  $('m-full').onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else fsEl.requestFullscreen({ navigationUI: 'hide' }).catch(() => {}); closeSheet(); };
+  const requestFull = fsEl.requestFullscreen || fsEl.webkitRequestFullscreen;
+  const fullEnabled = document.fullscreenEnabled ?? document.webkitFullscreenEnabled ?? !!requestFull;
+  if (!requestFull || !fullEnabled) { $('m-full').hidden = true; $('m-full').parentNode.classList.add('n5'); }
+  $('m-full').onclick = async () => {
+    try { if (fullscreenElement()) await exitFullscreen(); else await requestFull.call(fsEl); closeSheet(); }
+    catch (e) { toast('Full screen is unavailable in this browser or window', 3000); }
+  };
   $('m-set').onclick = () => openSheet('settings');
   $('m-reset').onclick = () => confirmTap($('m-reset'), $('m-reset').lastChild, 'Tap to reset', resetGame);
   $('m-home').onclick = goHome;
   $('sheet').querySelector('.scrim').onclick = () => closeSheet();
   for (const b of document.querySelectorAll('#sheet [data-nav=back]')) b.onclick = sheetBack;
+  $('sheet').addEventListener('keydown', e => {
+    if (e.key !== 'Tab' || rebinding) return;
+    const controls = sheetFocusables(), first = controls[0], last = controls[controls.length - 1];
+    if (!first) { e.preventDefault(); focusSheet(); }
+    else if (e.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (document.activeElement === last || !controls.includes(document.activeElement))) { e.preventDefault(); first.focus(); }
+  });
 
   // settings
   const tabs = { video: ['video', 'Video'], console: ['console', 'Console'], pad: ['pad', 'Controls'], data: ['data', 'Data'] };
   const showTab = t => {
-    for (const b of $('tabs').children) b.classList.toggle('on', b.dataset.tab === t);
+    for (const b of $('tabs').children) { const on = b.dataset.tab === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; }
     for (const p of $('set-body').children) p.hidden = p.dataset.pane !== t;
     $('set-body').scrollTop = 0;
   };
-  for (const b of $('tabs').children) { const [i, label] = tabs[b.dataset.tab]; b.innerHTML = UiArt.icon(i) + label; b.onclick = () => showTab(b.dataset.tab); }
+  $('tabs').setAttribute('role', 'tablist'); $('tabs').setAttribute('aria-label', 'Settings');
+  for (const b of $('tabs').children) {
+    const [i, label] = tabs[b.dataset.tab]; b.innerHTML = UiArt.icon(i) + label; b.onclick = () => showTab(b.dataset.tab);
+    b.id = 'tab-' + b.dataset.tab; b.setAttribute('role', 'tab'); b.setAttribute('aria-controls', 'pane-' + b.dataset.tab);
+  }
+  for (const p of $('set-body').children) { p.id = 'pane-' + p.dataset.pane; p.setAttribute('role', 'tabpanel'); p.setAttribute('aria-labelledby', 'tab-' + p.dataset.pane); }
+  $('tabs').addEventListener('keydown', e => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    const buttons = [...$('tabs').children], i = buttons.indexOf(document.activeElement); if (i < 0) return;
+    e.preventDefault();
+    const n = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (i + (e.key === 'ArrowLeft' ? -1 : 1) + buttons.length) % buttons.length;
+    buttons[n].click(); buttons[n].focus();
+  });
   showTab('video');
   bindSetting('s-renderer', 'renderer', 'sel', applyRenderer);
   bindSetting('s-scale', 'scale', 'num', applyScale);
@@ -1245,7 +1306,7 @@ function initUI() {
   addEventListener('pointerdown', () => audioStart(), { capture: true });
   // rotation and browser chrome changes arrive in several steps on phones; lay out again once things have settled
   const relayout = e => { if (e && e.type !== 'fullscreenchange' && e.target !== self.visualViewport) hostReset(); resize(); clearTimeout(relayout.t); relayout.t = setTimeout(resize, 350); };
-  for (const ev of ['resize', 'orientationchange', 'fullscreenchange']) addEventListener(ev, relayout);
+  for (const ev of ['resize', 'orientationchange', 'fullscreenchange', 'webkitfullscreenchange']) addEventListener(ev, relayout);
   if (self.visualViewport) visualViewport.addEventListener('resize', relayout);
   if (self.ResizeObserver) new ResizeObserver(resize).observe($('screen'));
   document.addEventListener('visibilitychange', () => {

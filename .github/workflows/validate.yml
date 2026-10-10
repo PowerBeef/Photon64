@@ -28,37 +28,75 @@ jobs:
             out/homebrew.json
             out/legacy-reference-diagnostic.log
             out/photon64.html
+            out/n64.wasm
   browser:
-    runs-on: ubuntu-24.04
+    needs: baseline
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        mobile: ['0', '1']
+        include:
+          - { os: ubuntu-24.04, engine: chromium, channel: '', mobile: '0' }
+          - { os: ubuntu-24.04, engine: chromium, channel: '', mobile: '1' }
+          - { os: ubuntu-24.04, engine: chromium, channel: chrome, mobile: '0' }
+          - { os: ubuntu-24.04, engine: chromium, channel: msedge, mobile: '0' }
+          - { os: macos-15, engine: webkit, channel: '', mobile: '0' }
+          - { os: macos-15, engine: webkit, channel: '', mobile: '1' }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
-      - uses: actions/setup-python@v5
+      - run: npm ci
+      - uses: actions/download-artifact@v4
         with:
-          python-version: '3.12'
-      - run: tools/setup.sh
-      - run: npx playwright install --with-deps chromium
-      - name: Build the self-contained app
-        run: . out/env.sh && npm run build
+          name: validation-evidence
+          path: out
+      - run: npx playwright install --with-deps ${{ matrix.channel || matrix.engine }}
       - name: Check browser persistence and lifecycle with a shipped fixture
         run: node tools/browsercheck.mjs testroms/RSPCP2VRCP.N64
         env:
+          BROWSER_ENGINE: ${{ matrix.engine }}
+          BROWSER_CHANNEL: ${{ matrix.channel }}
           BROWSER_MOBILE: ${{ matrix.mobile }}
-      - name: Benchmark repeatable software execution
+      - name: Check responsive menus, rotation, safe areas and high-DPI presentation
         if: matrix.mobile == '0'
+        run: node tools/responsivecheck.mjs testroms/RSPCP2VRCP.N64
+        env:
+          BROWSER_ENGINE: ${{ matrix.engine }}
+          BROWSER_CHANNEL: ${{ matrix.channel }}
+      - name: Benchmark repeatable software execution
+        if: matrix.engine == 'chromium' && matrix.channel == '' && matrix.mobile == '0'
         run: node tools/benchmark.mjs testroms/RSPCP2VRCP.N64 --frames 240 --warmup 120 --repeats 2 --output out/benchmark-fixture
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: browser-evidence-mobile-${{ matrix.mobile }}
+          name: browser-${{ matrix.engine }}-${{ matrix.channel || 'default' }}-mobile-${{ matrix.mobile }}
           path: |
             out/browser-evidence/
+            out/ui-evidence/
             out/benchmark-fixture/
+  safari:
+    needs: baseline
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: validation-evidence
+          path: out
+      - name: Enable WebDriver on the disposable hosted runner
+        run: sudo /usr/bin/safaridriver --enable
+      - name: Check branded Safari menus and persistence
+        run: node tools/safaricheck.mjs testroms/RSPCP2VRCP.N64
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-safari-evidence
+          path: out/safari-evidence/

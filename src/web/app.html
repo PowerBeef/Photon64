@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0e0f13">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -19,6 +19,8 @@
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
   font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
+body { position: relative; height: 100dvh; }
+:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
 button, select, input { font: inherit; color: inherit; }
 button { cursor: pointer; border: 0; background: none; padding: 0; }
 svg { display: block; }
@@ -45,11 +47,13 @@ svg { display: block; }
 .top { display: flex; align-items: center; gap: 12px; }
 .brand { display: flex; align-items: center; gap: 11px; flex: 1; min-width: 0; font: 800 25px/1 var(--round); letter-spacing: -.01em; }
 .brand i { font-style: normal; color: var(--yellow); }
+.brand > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#logo { flex: none; }
 #home .stripe { margin: 14px 0 0; width: 76px; }
 #empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 28px 0 12px; gap: 6px; }
 #empty h2 { font: 800 23px var(--round); margin: 12px 0 0; }
 #empty p { color: var(--dim); margin: 0 0 16px; max-width: 34ch; }
-@media (max-height: 520px) {
+@media (min-width: 560px) and (max-height: 520px) {
   #empty { display: grid; grid-template-columns: auto minmax(0, 34ch); column-gap: 26px; justify-content: center; align-content: center; text-align: left; padding: 10px 0 0; }
   #empty #emptyart { grid-row: 1 / 4; align-self: center; }
   #empty h2 { margin: 0; } #empty p { margin: 0 0 8px; } #empty #drop { justify-self: start; }
@@ -58,7 +62,7 @@ svg { display: block; }
 #empty.over svg path:first-child, .cart.add.over { stroke: var(--blue); border-color: var(--blue); }
 .sec-h { display: flex; align-items: center; justify-content: space-between; margin: 26px 0 12px; }
 .sec-h h2 { font: 800 19px var(--round); margin: 0; }
-#lib { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 14px; }
+#lib { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(148px, 100%), 1fr)); gap: 14px; }
 /* a game in the library is drawn as its cartridge: grey shell, the last screenshot as its label */
 .cart { position: relative; display: block; width: 100%; text-align: left; padding: 9px 9px 0; border-radius: 14px 14px 9px 9px; color: var(--text);
   background: linear-gradient(180deg, #5d626c, #3b3f48); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 6px 16px rgba(0, 0, 0, .35); transition: transform .15s, filter .15s; }
@@ -82,7 +86,8 @@ svg { display: block; }
 .cart.add svg { width: 30px; height: 30px; margin: 0 auto 6px; }
 #pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 30px; }
 .pill { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; padding: 5px 11px; border-radius: 99px; background: var(--surface); color: var(--dim); }
-.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+.pill { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.pill::before { content: ""; width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--dim); }
 .pill.ok::before { background: var(--green); } .pill.warn::before { background: var(--yellow); }
 .fine { color: #6f7684; font-size: 11.5px; margin: 12px 0 0; }
 
@@ -97,7 +102,7 @@ svg { display: block; }
 /* the one button on the game screen: it pauses and opens the menu. With a mouse it shows while the pointer moves. */
 #b-menu { position: absolute; z-index: 20; display: block; opacity: .92; transition: opacity .25s; }
 #b-menu:active { opacity: 1; transform: scale(.94); }
-body:not(.touch) #b-menu.idle { opacity: 0; }
+body:not(.touch) #b-menu.idle:not(:focus-visible) { opacity: 0; }
 #flag { position: absolute; z-index: 12; left: 50%; top: calc(var(--st) + 12px); transform: translateX(-50%); display: flex; align-items: center; gap: 7px; padding: 6px 13px; border-radius: 99px;
   background: rgba(14, 15, 19, .78); font: 700 13px var(--round); pointer-events: none; }
 #flag svg { width: 15px; height: 15px; color: var(--yellow); }
@@ -130,22 +135,23 @@ body:not(.touch) #b-menu.idle { opacity: 0; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(18px) scale(.98); } }
 @media (max-width: 560px) and (orientation: portrait) {
-  #sheet { align-items: flex-end; padding: calc(var(--st) + 24px) 0 0; }
+  #sheet { align-items: flex-end; padding: calc(var(--st) + 24px) var(--sr) 0 var(--sl); }
   #sheet .panel { width: 100%; border-radius: 26px 26px 0 0; padding-bottom: var(--sb); }
   #sheet.wide .panel { height: min(680px, 86%); }
 }
-.pg { display: flex; flex-direction: column; min-height: 0; }
+.pg { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
 .pg-h { display: flex; align-items: center; gap: 12px; padding: 16px 18px 12px; flex: none; }
 .pg-h h2 { flex: 1; min-width: 0; margin: 0; font: 800 20px var(--round); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pg-h .ibtn { width: 38px; height: 38px; }
-.pg-b { overflow: auto; -webkit-overflow-scrolling: touch; padding: 2px 18px 18px; min-height: 0; }
+.pg-b { overflow: auto; -webkit-overflow-scrolling: touch; padding: 2px 18px 18px; min-height: 0; flex: 1 1 auto; }
 /* game menu */
+#pg-menu { display: block; overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .now { display: flex; align-items: center; gap: 13px; padding: 16px 18px 6px; }
 .now img, .now .noimg { width: 92px; aspect-ratio: 4 / 3; border-radius: 10px; object-fit: cover; background: #0c0d10; flex: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); }
 .now div { min-width: 0; flex: 1; }
 .now b { display: block; font: 800 19px/1.2 var(--round); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now span { color: var(--dim); font-size: 12.5px; }
-.tiles { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; padding: 12px 18px 10px; }
+.tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; padding: 12px 18px 10px; }
 .tiles .tile { grid-column: span 2; }
 .tiles.n5 #m-mute, .tiles.n5 #m-set { grid-column: span 3; }      /* no full screen on this device: three and two */
 .foot { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 18px 18px; }
@@ -183,14 +189,14 @@ body:not(.touch) #b-menu.idle { opacity: 0; }
 .hint { color: var(--dim); font-size: 12.5px; margin: 12px 2px 0; }
 /* settings */
 .tabs { display: flex; gap: 6px; padding: 0 18px 12px; flex: none; }
-.tabs button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 9px 2px 7px; border-radius: 14px; color: var(--dim); font: 600 11.5px var(--round); background: var(--raised); transition: color .15s, background .15s; }
+.tabs button { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 9px 2px 7px; border-radius: 14px; color: var(--dim); font: 600 11.5px var(--round); background: var(--raised); transition: color .15s, background .15s; }
 .tabs button svg { width: 21px; height: 21px; }
 .tabs button.on { color: #fff; background: var(--c); }
 .row { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px 14px; padding: 12px 0; border-bottom: 1px solid #262a33; }
 .row:last-child { border-bottom: 0; }
 .row > label { flex: 1 1 150px; min-width: 0; font-weight: 600; }
 .row small { display: block; color: var(--dim); font-size: 12px; font-weight: 400; margin-top: 1px; }
-.seg { display: inline-flex; background: #0f1014; border-radius: 12px; padding: 3px; gap: 2px; max-width: 100%; }
+.seg { display: inline-flex; flex-wrap: wrap; background: #0f1014; border-radius: 12px; padding: 3px; gap: 2px; max-width: 100%; }
 .seg button { padding: 7px 12px; border-radius: 9px; color: var(--dim); font: 600 13px var(--round); white-space: nowrap; transition: background .15s, color .15s; }
 .seg button.on { background: var(--raised2); color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1); }
 .seg button:disabled { opacity: .35; cursor: default; }
@@ -206,13 +212,16 @@ input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border: 0; bord
 h3 { font: 700 12px var(--round); text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 18px 0 2px; }
 #binds { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 6px; margin-top: 8px; }
 #binds button { display: flex; justify-content: space-between; gap: 8px; background: var(--raised); border-radius: 10px; padding: 8px 10px; font-size: 13px; color: var(--text); }
-#binds button b { font: 600 12px ui-monospace, Menlo, monospace; color: var(--yellow); }
+#binds button b { font: 600 12px ui-monospace, Menlo, monospace; color: var(--yellow); overflow-wrap: anywhere; min-width: 0; }
 #binds button.wait { box-shadow: inset 0 0 0 2px var(--blue); }
 .btnrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 #dispbox { margin-top: 14px; color: var(--dim); font-size: 12.5px; }
 #dispbox summary { cursor: pointer; padding: 6px 0; }
 #dispinfo { margin: 6px 0 0; padding: 10px 12px; border-radius: 10px; background: #111318; color: #c9ced8; font: 11.5px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word; user-select: text; -webkit-user-select: text; }
 .about { color: var(--dim); font-size: 12.5px; margin-top: 14px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
 </style>
 </head>
 <body>
@@ -261,7 +270,7 @@ h3 { font: 700 12px var(--round); text-transform: uppercase; letter-spacing: .08
 
 <div id="sheet" hidden>
   <div class="scrim"></div>
-  <div class="panel" role="dialog" aria-modal="true">
+  <div class="panel" role="dialog" aria-modal="true" tabindex="-1">
     <div class="stripe"></div>
     <!-- game menu -->
     <div class="pg" id="pg-menu" hidden>
@@ -287,7 +296,7 @@ h3 { font: 700 12px var(--round); text-transform: uppercase; letter-spacing: .08
     </div>
     <!-- settings -->
     <div class="pg" id="pg-settings" hidden>
-      <div class="pg-h"><button class="ibtn" data-nav="back" aria-label="Back"></button><h2>Settings</h2></div>
+      <div class="pg-h"><button class="ibtn" data-nav="back" aria-label="Back"></button><h2 id="set-title">Settings</h2></div>
       <div class="tabs" id="tabs">
         <button data-tab="video" style="--c: var(--blue)"></button><button data-tab="console" style="--c: var(--green)"></button>
         <button data-tab="pad" style="--c: var(--red)"></button><button data-tab="data" style="--c: #d49b00"></button>

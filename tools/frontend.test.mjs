@@ -23,7 +23,7 @@ function environment(actual = false) {
     return tx;
   } };
   const context = vm.createContext({ console: { error() {}, log() {} }, window: {}, self: { CompressionStream, DecompressionStream },
-    document: { getElementById: () => ({ hidden: true, classList: { toggle() {} } }), title: '' },
+    document: { getElementById: () => ({ hidden: true, focus() {}, classList: { toggle() {} } }), title: '' },
     localStorage: { getItem() { return null; } }, matchMedia: () => ({ matches: false }), addEventListener() {},
     Uint8Array, Uint32Array, DataView, ArrayBuffer, WebAssembly, Blob, Response, CompressionStream, DecompressionStream,
     TextDecoder, URLSearchParams, location: { search: '' }, Promise, Map, Set, performance, setTimeout, clearTimeout, structuredClone, navigator: {} });
@@ -35,7 +35,8 @@ function environment(actual = false) {
   Object.assign(context, { _ex: ex, _hi: hi, _db: db, _messages: messages });
   vm.runInContext(`ex = _ex; hi = _hi; idb = Promise.resolve(_db); this.realApplyRenderer = applyRenderer;
     toast = msg => _messages.push(msg);
-    for (const name of ['applyRenderer', 'resize', 'updateTouchVisibility', 'updateFlag', 'audioStart', 'audioReset', 'wakeLock', 'pokeMenu', 'closeSheet', 'renderLibrary']) eval(name + ' = () => {}');
+    this.realResize = resize;
+    for (const name of ['applyRenderer', 'resize', 'updateTouchVisibility', 'updateFlag', 'audioStart', 'audioReset', 'wakeLock', 'pokeMenu', 'closeSheet', 'renderLibrary', 'releaseInput']) eval(name + ' = () => {}');
     updateXpak = () => ({ kind: 0, now: false }); grabThumb = async () => '';
     this.api = { loadRom, saveState, loadState, flushSaves, idbWrite, openFile, readBounded, sessionOp, goHome, resetGame,
       setRom: r => { rom = r; running = !!r; }, getRom: () => rom, running: () => running,
@@ -134,4 +135,17 @@ test('synchronous presentation failure stops fields and preserves battery export
   assert.equal(e.context.presentResult, false);
   assert.equal(e.api.running(), false); assert.equal(e.api.rendererFailed(), true);
   assert.equal(e.api.battery().length, 0x40800);
+});
+
+test('presentation resize preserves high-DPI aspect ratio while limiting allocation', () => {
+  const e = environment();
+  for (const [width, height, dpr] of [[3440, 1440, 2], [3840, 2160, 3], [640, 360, 2], [0, 0, 1]]) {
+    const cv = { width: 0, height: 0 }, sw = { style: {} }, screen = { clientWidth: width, clientHeight: height };
+    e.context.document.getElementById = id => ({ 'screen': screen, 'cv-gpu': cv, 'cv-sw': sw })[id];
+    e.context.window.devicePixelRatio = dpr;
+    vm.runInContext('touchLayout = () => {}; settings.aspect = 0; realResize();', e.context);
+    assert.ok(cv.width >= 1 && cv.width <= 4096 && cv.height >= 1 && cv.height <= 4096);
+    assert.ok(Math.abs(cv.width * height - cv.height * width) <= height + width);
+    if (width && height) assert.ok(Math.abs(parseFloat(sw.style.width) * 3 - parseFloat(sw.style.height) * 4) < 1);
+  }
 });

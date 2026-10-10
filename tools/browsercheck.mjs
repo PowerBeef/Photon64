@@ -1,5 +1,5 @@
-// Real browser persistence/lifecycle checks. Run in an environment supporting Chromium.
-import { chromium } from 'playwright';
+// Real browser persistence/lifecycle checks. Run in an environment supporting the selected Playwright browser.
+import { chromium, webkit } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -9,13 +9,15 @@ const html = fs.readFileSync('out/photon64.html');
 const errors = [], logs = [];
 const evidence = process.env.BROWSER_EVIDENCE || 'out/browser-evidence';
 fs.mkdirSync(evidence, { recursive: true });
+const engine = process.env.BROWSER_ENGINE || 'chromium', channel = process.env.BROWSER_CHANNEL || '';
+if (!['chromium', 'webkit'].includes(engine)) throw Error('Unsupported browser engine: ' + engine);
 const mobile = process.env.BROWSER_MOBILE === '1';
-const report = { outcome: 'FAIL', mobile, renderer: 'software', checks: [], errors, logs };
+const report = { outcome: 'FAIL', engine, channel, mobile, renderer: 'software', checks: [], errors, logs };
 const server = http.createServer((_, res) => { res.setHeader('Content-Type', 'text/html'); res.end(html); });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
 let browser, context, page;
 try {
-  browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, args: ['--autoplay-policy=no-user-gesture-required'] });
+  browser = await (engine === 'webkit' ? webkit : chromium).launch(engine === 'webkit' ? {} : { channel: channel || undefined, executablePath: process.env.CHROME_EXECUTABLE || undefined, args: ['--autoplay-policy=no-user-gesture-required'] });
   report.browser = browser.version();
   context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 }, isMobile: mobile, hasTouch: mobile });
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
@@ -38,13 +40,16 @@ try {
   await page.keyboard.press('Escape');
   await page.locator('#m-resume').click();
   report.checks.push('keyboard pause/resume and menu resume');
-  const cdp = await context.newCDPSession(page);
-  await cdp.send('Profiler.enable'); await cdp.send('Profiler.start');
+  const cdp = engine === 'chromium' ? await context.newCDPSession(page) : null;
+  if (cdp) { await cdp.send('Profiler.enable'); await cdp.send('Profiler.start'); }
   const first = await field(), started = performance.now();
   await page.waitForFunction(n => new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[21], 8)[0] >= n + 120, first, { timeout: 60000 });
   const elapsedMs = performance.now() - started, completed = (await field()) - first;
-  const { profile } = await cdp.send('Profiler.stop');
-  fs.writeFileSync(path.join(evidence, 'browser.cpuprofile'), JSON.stringify(profile));
+  if (cdp) {
+    const { profile } = await cdp.send('Profiler.stop');
+    fs.writeFileSync(path.join(evidence, 'browser.cpuprofile'), JSON.stringify(profile));
+  }
+  report.cpuProfile = cdp ? 'PASS: captured through CDP' : 'SKIP: CDP profiler is Chromium-only';
   report.pacedRun = { fields: completed, elapsedMs, fieldsPerSecond: completed * 1000 / elapsedMs, note: 'Browser-paced smoke measurement with tracing/profiling overhead; not peak throughput.' };
   report.checks.push('120 additional emulated fields');
   assert.deepEqual(await page.evaluate(() => Promise.all([window.__photon.saveState(0, ''), window.__photon.saveState(1, '')])), [true, true]);
@@ -102,12 +107,14 @@ try {
   if (mobile) {
     const button = page.locator('#touch .t[data-b=A]');
     const box = await button.boundingBox();
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 7 }] });
+    if (cdp) await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 7 }] });
+    else await page.evaluate(({ x, y }) => document.getElementById('stage').dispatchEvent(new PointerEvent('pointerdown', { pointerId: 7, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, cancelable: true })), { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+    report.heldTouch = cdp ? 'CDP touch input' : 'Synthetic PointerEvent; real taps covered by responsive lane';
     assert.ok(await page.evaluate(() => window.__photon.touchState.buttons & 0x8000));
   }
   await page.evaluate(() => window.dispatchEvent(new Event('blur')));
   assert.deepEqual(await page.evaluate(() => ({ ...window.__photon.touchState })), { buttons: 0, x: 0, y: 0 });
-  if (mobile) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  if (mobile && cdp) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await page.keyboard.up('KeyX');
   report.checks.push('focus loss releases held inputs');
   const temporary = await browser.newContext();

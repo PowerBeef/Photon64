@@ -50,6 +50,8 @@ Open the app, add a cartridge dump, and return to it from your game library. No 
 
 WebGPU is optional. If the browser cannot provide a suitable adapter, Photon64 uses software rendering. GPU availability, game speed, and higher resolutions depend on your browser and device.
 
+The interface adapts to phones, tablets, desktop windows and ultrawide displays, with safe-area spacing and scrollable menus. See the [UI and browser review](UI_COMPATIBILITY.md) for the test matrix, observed results and remaining physical-device checks.
+
 Bring your own cartridge dumps. **Commercial games are not included.** The repository's `testroms/` directory contains homebrew development fixtures.
 
 <details>
