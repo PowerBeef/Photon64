@@ -1,0 +1,13 @@
+{
+  "source_sha": "1e8c2ea4019a152db0c17dc77ae77ef7a1bf4e38",
+  "dirty": false,
+  "node": "v24.21.0",
+  "wasm_sha256": "cb6420e43762fb00c7c2d1d2bc385de02b017e43e14c34510944ad8e8bb92092",
+  "html_sha256": "6f1f23cc08b5cf675eee2756adbaa7c57d923be12c716ff7d2024ca6e96699ab",
+  "toolPins": "WASI_VERSION=34.0\nWASI_ARCH=x86_64-linux\nWASI_SHA256=b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4\nANGRYLION_COMMIT=9c8b9ed3e7d7f00dff8bc872ccdd3fba1a3673fc",
+  "components": [
+    "Photon64 MIT",
+    "SoftFloat 3e BSD-3-Clause",
+    "ares CIC adaptation ISC"
+  ]
+}

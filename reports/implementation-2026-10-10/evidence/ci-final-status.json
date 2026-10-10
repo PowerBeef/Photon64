@@ -1,0 +1,68 @@
+{
+  "source": "1e8c2ea4019a152db0c17dc77ae77ef7a1bf4e38",
+  "runId": 38087805779,
+  "url": "https://github.com/PowerBeef/Photon64/actions/runs/38087805779",
+  "outcome": "PASS",
+  "jobs": [
+    {
+      "name": "baseline",
+      "id": 114317884201,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "safari",
+      "id": 114318373504,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "gpu",
+      "id": 114318373561,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "browser-webkit-default-mobile-0",
+      "id": 114318373589,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "browser-chromium-chrome-mobile-0",
+      "id": 114318373592,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "browser-chromium-default-mobile-1",
+      "id": 114318373594,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "browser-chromium-default-mobile-0",
+      "id": 114318373607,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "browser-chromium-msedge-mobile-0",
+      "id": 114318373663,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "browser-webkit-default-mobile-1",
+      "id": 114318373665,
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "artifact": {
+    "id": 11682814746,
+    "digest": "sha256:7a42515ab7d2b4c0382cad5372f674ddb9f21280db4089e7ac13f6b7c686c8c4"
+  },
+  "nativeSafari": "desktop-alone plus five full sequences; native OS-backed chooser SKIP",
+  "adapter": "Mesa software Vulkan; not physical GPU"
+}

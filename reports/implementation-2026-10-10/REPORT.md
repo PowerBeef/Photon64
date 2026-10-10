@@ -1,6 +1,6 @@
 # Photon64 audit implementation: changes, acceptance and remaining gates
 
-**Date:** 10 October 2026. **Frozen audit:** [`96a7f07`](../audit-2026-10-10/REPORT.md). **Implementation commits:** `6d8a9e1` (correctness/product/CI), `228a4db` (Safari journal regression, five-sequence gate, full diagnostic identity). Subsequent source/evidence changes are recorded in git history and individual CI records. This report tracks implementation; it does not overwrite the original audit or reinterpret its failures as passes.
+**Date:** 10 October 2026. **Frozen audit:** [`96a7f07`](../audit-2026-10-10/REPORT.md). **Implementation commits:** `6d8a9e1` (correctness/product/CI), `228a4db` (Safari journal regression/five-sequence gate), `6cb5ecf` (GPU validation ownership/recovery/docs), `1e8c2ea` (browser save-generation regression). Subsequent source/evidence changes are recorded in git history and individual CI records. This report tracks implementation; it does not overwrite the original audit or reinterpret its failures as passes.
 
 ## Delivery status
 
@@ -24,12 +24,26 @@ The reproduced save/reset/state, cartridge identity/selection, GPU range/lifecyc
 | F10 packing UB | Cast bytes/fields to unsigned before high shifts; zero-length boot copy guarded | Actual ROM/peripheral high-bit inputs and ASan/UBSan baseline pass. |
 | F11 asynchronous GPU errors | Early loss/uncaptured handlers, immediate submit-scope pop, first-cause latch, bounded event ring, validation-tail barrier | Rejected mapping/submission/validation never acknowledges; device loss and diagnostic export pass. The user’s physical-device incident remains unassigned. |
 | F12 GPU CI absent | Mandatory `gpu` job: actual WGSL native/HD-at-1x vectors, deliberate loss and continuous authored core/GPU transitions | Hosted GPU job passed on implementation revisions. Zero drawing now fails lifecycle coverage. Required exact job set includes this lane. |
-| F13 Safari/direct-file | Incremental command journal, global and per-request budgets, short failure cleanup, desktop-alone + five full sequences; browser file-origin smoke | Safari 26.6.1 on macOS 15.7.9 passed desktop-alone and five sequences on `228a4db`. Native OS-backed read remains SKIP/NotReadableError. Original historical stall cause is not retrospectively assigned. |
+| F13 Safari/direct-file | Incremental command journal, global and per-request budgets, short failure cleanup, desktop-alone + five full sequences; browser file-origin smoke | Safari 26.6.1 on macOS 15.7.9 passed desktop-alone and five sequences on both `228a4db` and final `1e8c2ea`. Native OS-backed read remains SKIP/NotReadableError. Original historical stall cause is not retrospectively assigned. |
 | F14 ordered rendering cost | Counts, span-derived sample totals/maxima, queue completion, readback and frame percentiles; input event-to-submit timing | Instrumented. Dependency partitioning/chunking and physical performance improvement are not implemented without independent semantics and device measurements. |
 | F15 runtime memory | Actual-size reusable ROM capacity, count-only slot existence, owned file candidates, serialized imports, bounded readback concurrency/pool | 8/32/64 MiB repeated reserve plateaus; fresh 8 MiB cartridge uses 72.25 MiB WASM versus old 128.25 MiB reserve. Process/GPU peak and physical memory-pressure measurements remain open. |
 | F16 compatibility | ISC ares-based 6105 response with reproducible model vectors; region/revision/digest metadata; safe media override; four gamepads | Native 304 additional CIC assertions; CIC protocol expectations remain implementation-derived. Model agreement is not physical protocol or protected-checkpoint certification. Full hardware program remains open. |
 | F17 product reliability | Audio retry/cleanup and counters; sibling library controls; Web Lock single writer; atomic library transactions; storage usage; portable files and backup swap | Focused 44.1/48 kHz initialization/queue, four ports/reconnect, lock conflict, portable identity/core rejection and aborted backup recovery tests pass. Physical audio, VoiceOver and eviction/device recovery sign-off remain open. |
 | F18 release/provenance | Immutable action pins; exact nine-job predicate; tested artifact SHA-256/build metadata; notices copied from source SHA; indexed audit/status/capabilities/migration | Negative missing/duplicate/skipped gate tests pass. Stale old release manifest is rejected. Fixture permissions/capture settings and RDP derivation chain remain explicitly unverified in `THIRD_PARTY.md`. |
+
+## Audit-phase acceptance map
+
+| Phase | Delivered in this pass | Exit still requiring evidence |
+|---|---|---|
+| 0: evidence | Frozen audit preserved; source/core identities; first failures retained; native Safari journals and repeated sequences | Affected physical-device renderer incident and historical Safari stall are not retrospectively diagnosed. |
+| 1: save integrity | Reset/state barriers, host revision, held/aborted transaction regressions, recovery/export behavior | Physical storage eviction/power-loss testing. |
+| 2: identity and selection | Canonical digest, atomic verified migration, latest selection, bounded owned imports | Larger real-user legacy migrations and physical memory pressure. |
+| 3: GPU ownership | Circular tracking, scale generations, partial cleanup, upload/submission validation ownership and fail-stop barriers | Independent installed-RAM boundary expectations; real 2x/4x driver pressure. |
+| 4: mandatory evidence | Named GPU job, native/HD-at-1x drawing and loss, full RAM/hidden/register continuous comparisons, direct-file and browser lanes | Physical iOS/Android and native chooser coverage. |
+| 5: bounded CPU defects | Unsigned assembly, original merge fault addresses and consistent segment protection, sanitizer/O0/O3 validation | Broader cache/timing/64-bit architecture remains Phase 6. |
+| 6: compatibility | CIC response/model vectors, cartridge metadata and save overrides/backups, explicit conformance boundaries | Hardware CIC/FPU/renderer corpus, protected checkpoint and cache/timing/64-bit implementation. |
+| 7: memory/pacing | Actual-size reusable capacity, metadata-only reads, bounded readbacks, ordered/GPU/frame/input/audio counters | Physical integrated/discrete/mobile baselines and proven safe scheduling optimization. |
+| 8: product/release | Audio recovery, four ports, library semantics, single writer, backup/portable files, migration docs and exact artifact gates | Physical audio/controllers/VoiceOver; unresolved fixture/source provenance. Preview 2 selects the corrected revision with all nine jobs passed. |
 
 ## Source behavior and design choices
 
@@ -64,7 +78,7 @@ Four standard gamepads use stable index/ID slots, per-port presence/pak/rumble a
 | Real GPU vectors | Fourteen batches native and full-storage HD-at-1x pass; twelve retained registers per batch | Twelve independently compared stream batches plus two C/WGSL-only circular boundary batches. Not a full machine-state comparison. |
 | Real device loss | Loss barrier/reset reject as required | Dawn + Mesa llvmpipe software Vulkan, not physical driver coverage. |
 | Authored continuous lifecycle | 180 fields, 3,752 GPU batches, 2,264,924,160 compared RAM/hidden bytes, state restore and reset pass | Native and full-storage HD-at-1x. Real drawing, CPU reads and partial writes. Hidden comparison uses effective ownership/shadow semantics, not stale backing bytes. |
-| Hosted `228a4db` | All nine required jobs passed, including six desktop/mobile browser variants and native Safari | Exact source `228a4db`; later changes require their own final CI gate. Status retained in `evidence/ci-status.json`. |
+| Hosted final `1e8c2ea` | All nine required jobs passed, including six desktop/mobile browser variants and native Safari | Exact source `1e8c2ea`, run `38087805779`. Final status/build hashes retained in `evidence/ci-final-status.json` and `evidence/tested-build-info.json`; earlier `228a4db` status remains. |
 
 The [evidence directory](evidence/) retains synthetic/homebrew logs and CI status. Commercial-derived results remain private after automatic publication review rejected public disclosure; source changes and noncommercial evidence are unaffected. Commercial cartridge inventory, hashes and execution evidence are retained privately and excluded from public repository artifacts. Baseline and initial GPU checks were taken during source development with dirty working state; individual logs record source file/core hashes. Hosted validation is the exact-commit authority. A later frontend-only change does not reclassify an earlier C baseline as a fresh full run.
 
@@ -104,4 +118,14 @@ RDP_BOUNDARY_DIAGNOSTIC=1 ./out/oracle_test # deliberately nonzero while disagre
 
 ## Final-candidate Safari save-generation regression
 
-Candidate `6cb5ecf` passed eight of nine required CI jobs in run `38087127723`; native Safari failed its third sequence with battery byte `0` instead of `90`. The test directly changed EEPROM but assigned dirty generation `1`, reusing the restored state's generation while an older autosave could still be pending. That violates the guest's nonzero monotonic write-generation contract. A held-transaction actual-WASM regression reproduces the same assertion; its first failure is retained in `evidence/safari-generation-reproduction.log`. The harnesses now increment the generation exactly as guest EEPROM writes do. The corrected regression retains the byte-for-byte durable reload assertion; all 68 Node tests pass. The failed CI attempt is retained; final corrected-source native Safari validation is still required before publication.
+Candidate `6cb5ecf` passed eight of nine required CI jobs in run `38087127723`; native Safari failed its third sequence with battery byte `0` instead of `90`. The test directly changed EEPROM but assigned dirty generation `1`, reusing the restored state's generation while an older autosave could still be pending. That violates the guest's nonzero monotonic write-generation contract. A held-transaction actual-WASM regression reproduces the same assertion; its first failure is retained in `evidence/safari-generation-reproduction.log`. The harnesses now increment the generation exactly as guest EEPROM writes do. The corrected regression retains the byte-for-byte durable reload assertion; all 68 Node tests pass. The failed CI attempt is retained; the corrected source `1e8c2ea` passed every required job in run `38087805779`, including desktop-alone and five complete native Safari sequences.
+
+## Selected release artifact
+
+Preview `v1.0.0-preview.2` selects validated source `1e8c2ea4019a152db0c17dc77ae77ef7a1bf4e38`, run `38087805779`. The release manifest/documentation commit is separate from the tested production source. It does not rebuild or substitute the app.
+
+- Tested HTML: 462,470 bytes; SHA-256 `6f1f23cc08b5cf675eee2756adbaa7c57d923be12c716ff7d2024ca6e96699ab`.
+- Tested WASM: SHA-256 `cb6420e43762fb00c7c2d1d2bc385de02b017e43e14c34510944ad8e8bb92092`, identical to the local private replays.
+- The publication workflow rejects missing/skipped/duplicate jobs, a dirty tested build, incorrect source, changed HTML or mismatched embedded/tested WASM. Notices come from the selected source SHA.
+
+The original Safari journal failure, save-generation aliasing failure, intentionally failing boundary diagnostic and optional legacy mixed-stage screenshot failures remain visible. They are not erased by the final green required matrix. Physical/hardware/provenance work listed above remains open.

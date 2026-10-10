@@ -1,6 +1,6 @@
 # Saves, upgrades and recovery
 
-These changes are in development source after `6d8a9e1`; older downloadable previews may have different storage behavior. Keep the old HTML file until you have verified your battery backup in the new build.
+These changes are included in `v1.0.0-preview.2` and development source; older previews have different storage behavior. Keep the old HTML file until you have verified your battery backup in the new build.
 
 ## Before upgrading
 

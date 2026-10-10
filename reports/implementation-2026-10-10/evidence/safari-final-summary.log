@@ -1,0 +1,28 @@
+2026-10-10T21:32:04.4612620Z Safari independent file probe: {"outcome":"SKIP","error":"NotReadableError","size":1052672,"message":"The I/O read operation failed.","reason":"The independent OS-backed File read fails before the app participates. Native filesystem chooser validation is blocked on this runner."}
+2026-10-10T21:32:11.6190440Z PASS native Safari desktop [1000,688]
+2026-10-10T21:32:11.6389000Z PASS native Safari 26.6.1
+2026-10-10T21:32:13.8204400Z Safari independent file probe: {"outcome":"SKIP","error":"NotReadableError","size":1052672,"message":"The I/O read operation failed.","reason":"The independent OS-backed File read fails before the app participates. Native filesystem chooser validation is blocked on this runner."}
+2026-10-10T21:32:19.4661940Z PASS native Safari narrow [390,792]
+2026-10-10T21:32:25.8771320Z PASS native Safari landscape [1000,448]
+2026-10-10T21:32:31.1734340Z PASS native Safari desktop [1000,688]
+2026-10-10T21:32:31.1788380Z PASS native Safari 26.6.1
+2026-10-10T21:32:33.2803280Z Safari independent file probe: {"outcome":"SKIP","error":"NotReadableError","size":1052672,"message":"The I/O read operation failed.","reason":"The independent OS-backed File read fails before the app participates. Native filesystem chooser validation is blocked on this runner."}
+2026-10-10T21:32:38.9933000Z PASS native Safari narrow [390,792]
+2026-10-10T21:32:44.2460960Z PASS native Safari landscape [1000,448]
+2026-10-10T21:32:49.1651970Z PASS native Safari desktop [1000,688]
+2026-10-10T21:32:49.1689750Z PASS native Safari 26.6.1
+2026-10-10T21:32:51.2720430Z Safari independent file probe: {"outcome":"SKIP","error":"NotReadableError","size":1052672,"message":"The I/O read operation failed.","reason":"The independent OS-backed File read fails before the app participates. Native filesystem chooser validation is blocked on this runner."}
+2026-10-10T21:32:57.3692270Z PASS native Safari narrow [390,792]
+2026-10-10T21:33:02.6812050Z PASS native Safari landscape [1000,448]
+2026-10-10T21:33:07.6078740Z PASS native Safari desktop [1000,688]
+2026-10-10T21:33:07.6241130Z PASS native Safari 26.6.1
+2026-10-10T21:33:09.7832570Z Safari independent file probe: {"outcome":"SKIP","error":"NotReadableError","size":1052672,"message":"The I/O read operation failed.","reason":"The independent OS-backed File read fails before the app participates. Native filesystem chooser validation is blocked on this runner."}
+2026-10-10T21:33:15.1115580Z PASS native Safari narrow [390,792]
+2026-10-10T21:33:20.4223340Z PASS native Safari landscape [1000,448]
+2026-10-10T21:33:25.3836280Z PASS native Safari desktop [1000,688]
+2026-10-10T21:33:25.3901680Z PASS native Safari 26.6.1
+2026-10-10T21:33:27.2208030Z Safari independent file probe: {"outcome":"SKIP","error":"NotReadableError","size":1052672,"message":"The I/O read operation failed.","reason":"The independent OS-backed File read fails before the app participates. Native filesystem chooser validation is blocked on this runner."}
+2026-10-10T21:33:32.3200990Z PASS native Safari narrow [390,792]
+2026-10-10T21:33:37.0596400Z PASS native Safari landscape [1000,448]
+2026-10-10T21:33:42.2086600Z PASS native Safari desktop [1000,688]
+2026-10-10T21:33:42.2241790Z PASS native Safari 26.6.1

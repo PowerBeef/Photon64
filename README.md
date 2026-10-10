@@ -69,7 +69,7 @@ Then open <http://localhost:8000/photon64.html>.
 
 Games, saves, and states belong to the browser storage for the address you use. Switching browser profiles or moving between a local file and localhost may give you a different library. Use **Settings → Data → Export save** to back up game-save data before clearing browser storage. If persistent storage is unavailable, the app labels the session as temporary.
 
-Save states are tied to the core build and cartridge. Keep battery backups when upgrading. See [save migration and recovery](MIGRATION.md) for the development build’s cartridge hashing, cross-tab protection, portable files and previous-save recovery.
+Save states are tied to the core build and cartridge. Keep battery backups when upgrading. See [save migration and recovery](MIGRATION.md) for cartridge hashing, cross-tab protection, portable files and previous-save recovery.
 
 </details>
 
@@ -91,7 +91,7 @@ The keyboard layout is remappable in **Settings → Controls**. Save/load shortc
 | Save / load first state slot | F2 / F4 |
 | Menu / back | Esc |
 
-Standard gamepads use the left stick for movement and the right stick for C buttons. The menu provides save-state slots, reset, fullscreen, and a fast-forward toggle. Touch settings let you adjust the pad's size, height, opacity, and D-pad visibility.
+Up to four standard gamepads use stable player ports, with the left stick for movement and the right stick for C buttons. Keyboard and touch control player 1. The menu provides save-state slots, reset, fullscreen, and a fast-forward toggle. Touch settings let you adjust the pad's size, height, opacity, and D-pad visibility.
 
 ## Under the hood
 
