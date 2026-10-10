@@ -1,62 +1,78 @@
-# AGENTS.md
-## Code Map
+# Photon64 agent guide
 
-- `src/` — C core (`n64.c` plus cpu/rsp/rdp/vi/bus/api/gpu) and `src/web/` frontend (`app.html` template, `app.js`/`gpu.js`/`pad.js`/`art.js`, `*.wgsl` shaders)
-- `tools/` — `build.mjs` bundler, Node/Python test harnesses, and `tools/inputs/` recorded input scripts (`sm64|ge|pd|mk64.txt`)
-- `roms/` — local ROM library for manual and regression testing (not source); see `## ROMs` for the file mapping
-- `build_wasm.sh` — WASM build script; `out/photon64.html` is the canonical single-file app bundle (no root copy is kept)
-- `node_modules/`, `.venv/` — generated: local Playwright install and Python venv (see `## Setup`; never edit by hand)
-- `testroms/` — krom RSP test ROMs (`.N64`) plus shipped reference screenshots (`.png`); see `## Validation`
+## Project and source map
 
-## Conventions
+Photon64 is an experimental Nintendo 64 emulator: a freestanding C core compiled to WASM, a JavaScript frontend, and native/WebGPU renderers. Read `DEVELOPMENT.md` for commands, `IMPLEMENTATION_PLAN.md` for priorities and acceptance criteria, and `VALIDATION_REPORT.md` for evidence and open failures. Deterministic boot runs or software/GPU agreement do not establish hardware accuracy.
 
-- Use `import ... from ...` syntax in `.mjs` files.
+- `src/n64.c` includes the core; `cpu.c`, `rsp.c`, `rdp.c`, `vi.c`, `bus.c`, `api.c` and `gpu.c` implement machine and host behavior.
+- `src/web/app.js` owns sessions, persistence and UI; `gpu.js` owns GPU coherence; `*.wgsl` implement rendering/merge passes. `app.html` is the bundle template.
+- `tools/` contains builds, tests, comparison gates and recorded inputs in `tools/inputs/`.
+- `testroms/` contains shipped homebrew fixtures and reference images. `roms/` contains ignored local commercial fixtures.
+- `out/photon64.html` is the canonical self-contained app; `out/n64.wasm` is the core. Outputs and dependencies are generated, not source.
 
-## Workflow
+## Working policy
 
-- Work from the `main` branch only; never create feature branches.
+- Work on `main`; do not create feature branches unless the user explicitly changes this policy.
+- Inspect status and relevant code before editing. Preserve unrelated user changes and newer remote commits. Use `rg`/`rg --files` for source searches.
+- Keep changes focused, maintain existing C/JavaScript style, and use ES module imports in `.mjs` tools.
+- Implement authorized work autonomously. A connected account does not authorize unrelated publishing, destructive operations or credential changes.
+- Before an authorized push, fetch/inspect remote `main`. Use a fast-forward update; GitHub connector ref updates must include the observed `expected_sha`. Do not force-push or bypass protections.
+- Commit only source, tests and documentation. Never commit commercial ROM bytes, SDK/driver/browser packages, `node_modules/`, `.venv/`, or `out/`. Inspect the actual staged paths.
+- Report changes, validation and unresolved failures. Distinguish local/published commits, queued/completed CI and unexecuted checks.
 
-## Setup (macOS, one time)
+## Reproducible environment
 
-- `brew install llvm lld` — Apple clang cannot link wasm32 and Homebrew LLVM ships without a linker; `build_wasm.sh` picks Homebrew LLVM automatically and fails with a clear error if `wasm-ld` is missing (`CC` or `WASI_SDK_PATH` override).
-- `npm i playwright && npx playwright install chromium` — run from the repo root; installs the `playwright` package locally and the browsers to `~/Library/Caches/ms-playwright`. Ignore the "install dependencies first" warning if it appears — it only means the command ran outside the repo.
-- `python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt` — Pillow/numpy/scipy for the image-diff scripts; `games.sh` uses the venv automatically.
-- Clone `ata4/angrylion-rdp-plus` to `../ref/angrylion-rdp-plus` (next to the repo root) to enable the `out/oracle_nn` differential step.
+Use Node 24+, Python 3.12 and a native C compiler (GCC 13 tested). `tools/versions.env` pins WASI SDK 34.0 with its archive digest and the Angrylion reference revision; npm and Python versions are pinned in lock/requirements files.
 
-## Build
+```sh
+tools/setup.sh
+. out/env.sh
+npm run validate
+```
 
-- `./build_wasm.sh` — compile `src/n64.c` to `out/n64.wasm` (needs Homebrew LLVM on macOS; honors `CC`).
-- `tools/build_native.sh` — build `out/native` always, plus `out/oracle_nn` when the Angrylion checkout is present.
-- `node tools/build.mjs` — assemble `out/photon64.html` from template + WASM + shaders + `src/web/*.js`.
+Setup supports Linux x86_64 and macOS, installs local dependencies, and writes `out/env.sh`. Set `REF` to a separate pinned checkout; do not silently switch an existing checkout. `tools/setup.sh --browser` also installs Playwright Chromium. Use `npm ci`, not ad hoc dependency upgrades. In hosted Work environments, the runtime Node binary may need its provided runtime dependency directory added to `PATH` before setup.
 
-## Validation
+`WASI_SDK_PATH` or `CC` select the WASM compiler; `NATIVE_CC` selects the native compiler for validation. `tools/build_native.sh` honors `REF`, `CFLAGS`, `LDFLAGS` and `REQUIRE_REFERENCE=1`. Missing required prerequisites fail; optional missing references remove stale oracle executables.
 
-- `node tools/run_wasm.mjs "roms/<game>.z64" [frames]` — headless WASM perf + parity checks; takes any ROM path (see `## ROMs`).
-- `tools/games.sh [sm64|ge|pd|mk64 ...]` — full regression suite; resolves each short name from `roms/` (a `<short>.z64` file at the root overrides the library copy). Skips missing ROMs.
-- `tools/games.sh --check-roms [...]` — report resolved ROM paths without running tests; exits nonzero if any requested ROM is missing. Run this first when the suite skips games.
-- `node tools/dawntest.mjs ...` / `node tools/gputest.mjs ...` — WebGPU-vs-software harnesses backing `games.sh` (`<rom> <frames> "<checks>" "[inputs]"`); the suite auto-selects Dawn bindings when present, else headless Chromium (`GPU_RUNNER=dawn|browser` forces one). `tools/*.py` summarize and diff the logs.
-- Browser harnesses (`apptest`, `gputest`, `games.sh` GPU steps) must run outside the agent sandbox — Chromium segfaults under it regardless of launch flags. Run them with a one-shot unsandboxed shell (`require_escalated`, batch everything into one command) or in your own terminal.
-- `.venv/bin/python tools/cmp_ref.py testroms [frames] [out-prefix]` — run the krom RSP test ROMs in `out/native` and compare green/red counts against the shipped reference screenshots.
-- `./out/rsptest` — RSP vector-op unit tests (VMACQ/VRSQ/VRCP/VMOV edge semantics); built and run by `tools/build_native.sh`.
-- `./out/bustest` — JoyBus PIF-packet bounds tests (short tx/rx must raise the channel error bit, never overrun the slot); built and run by `tools/build_native.sh`.
-- `./out/cputest` — CPU semantics tests (SRA/SRAV low-32-bit shift, LL/SC link broken by exceptions); built and run by `tools/build_native.sh`.
-- `node tools/jscheck.mjs` — Node checks over the shipped `src/web/app.js` (zip/ROM/state validation, cached memory views); no browser needed.
+## Build and verification
 
-## ROMs
+- `npm run build`: compile WASM and assemble the HTML app.
+- `npm run validate`: required baseline; native/WASM/app builds, JS regressions, native ASan/UBSan, identical O0/O3 WASM vectors, Expansion Pak checks, deterministic homebrew execution and comparator tests. Requires the pinned reference but no commercial ROM, browser or GPU.
+- `npm test`: focused frontend/GPU/gate regressions; actual-core cases require an existing `out/n64.wasm`.
+- `.venv/bin/python tools/cmp_ref.py testroms 120`: separate coarse reference-image gate. Documented discrepancies must stay visible.
+- `npm run test:roms`: local commercial fixtures for 300 fields twice, with hashes. PASS means determinism, not compatibility.
+- `tools/games.sh --check-roms`, then `GPU_RUNNER=dawn tools/games.sh`: recorded-input independent-reference and GPU/software lanes. Missing ROMs/adapters, incomplete checkpoints and counted mismatches fail.
 
-Quote paths — file names contain spaces. Short names are the `games.sh` / `tools/inputs/` keys, and the mapping lives in `rom_for()` inside `tools/games.sh`. UI harnesses without a ROM argument default to the Mario ROM:
+Run checks appropriate to changes; documentation-only edits do not require rebuilding unchanged semantics. Add meaningful regressions for reproduced failures. Do not weaken thresholds or change expectations merely to get green results. Preserve PASS/FAIL/SKIP: `--noref` and `--noexact` are diagnostic SKIP. GPU coverage remains VI RGB, last-batch framebuffer color/hidden/depth and three execution counters, not full machine-state conformance. Upload CPU-owned changes before inspecting raw GPU-cache memory.
 
-- `sm64` → `roms/Super Mario 64 (USA).z64`
-- `ge` → `roms/GoldenEye 007 (USA).z64`
-- `pd` → `roms/Perfect Dark (USA) (Rev 1).z64`
-- `mk64` → `roms/Mario Kart 64 (USA).z64`
-- Extras with no `games.sh` or input-script coverage: `roms/Super Smash Bros. (USA).z64`, `roms/World Driver Championship (USA).z64`
+## Browser and GPU execution
 
-## MCP Tooling
+```sh
+node tools/browsercheck.mjs testroms/RSPCP2VRCP.N64
+node tools/rdp_gpu_probe.mjs "roms/Mario Kart 64 (USA).z64"
+```
 
-- `chrome-devtools` — verify `photon64.html` and `tools/*.html` harnesses in a real browser: `new_page`/`navigate_page` to load, `take_snapshot` + `take_screenshot` to inspect UI, `list_console_messages` for `[core]`/JS errors, `performance_start_trace`/`performance_stop_trace` for frame-time work, `emulate` for mobile/touch viewports.
-- `cua_driver` — end-to-end runs beyond DevTools: `browser_set_input_files` to load a ROM from `roms/` through the file picker (`.z64` accepted), `browser_click`/`browser_pointer` for trusted input, `start_recording`/`replay_trajectory` for repeatable regression trajectories.
-- `context7` — look up current WebGPU/WGSL and Web API docs (`resolve_library_id`, then `query_docs`) before changing `src/web/gpu.js` or `*.wgsl` shaders.
-- `axiom` — optional native profiling: `axiom_xcprof_record` against the `tools/native.c` / `tools/oracle.c` headless harnesses, `axiom_xcprof_analyze` for CPU/hang attribution, `axiom_xcprof_compare` for before/after gating.
-- `github` / `mobilebuild` — not applicable here: no git remote or Xcode project in this workspace.
-- Division of labor — committed Playwright scripts for repeatable runs; the DevTools MCP for interactive debugging of failures the suite found.
+`browsercheck.mjs` checks duplicate state saves, state restoration, IndexedDB battery persistence across reload, cached cartridge loading and page errors. Its independent CI job uses a shipped fixture; never upload commercial cartridges for CI.
+
+Chromium harnesses must run outside the agent's command sandbox, where prior runs segfaulted. Use an approved outside-sandbox command, the user's terminal, or GitHub Actions. When the host disables escalation, do not repeatedly request it or change host security configuration. Document the unexecuted lane and use an authorized independent runner. GitHub access does not change local execution policy.
+
+Use installed Playwright Chromium or `CHROME_EXECUTABLE`. Dawn uses the local npm `webgpu` bindings. On Linux, install an OS Vulkan driver or set `VK_ICD_FILENAMES` to an existing ICD; lavapipe is a software adapter. This workspace has generated `.tools/lvp_icd.json`, which is not portable. On macOS select `GPU_BACKEND=metal`. Name the tested adapter and distinguish shader/coherence evidence from physical performance and device-loss testing.
+
+## Local ROM mapping
+
+Quote paths with spaces. `tools/games.sh` resolves these names; a root `<short>.z64` overrides its `roms/` entry.
+
+| Input key | Local fixture |
+|---|---|
+| `sm64` | `roms/Super Mario 64 (USA).z64` |
+| `ge` | `roms/GoldenEye 007 (USA).z64` |
+| `pd` | `roms/Perfect Dark (USA) (Rev 1).z64` |
+| `mk64` | `roms/Mario Kart 64 (USA).z64` |
+| Smoke only | `roms/Super Smash Bros. (USA).z64` |
+| Smoke only | `roms/World Driver Championship (USA).z64` |
+
+## Integrations and next work
+
+Use the GitHub plugin when available to inspect authenticated permissions, refs, code and Actions, and publish authorized source updates. Read generic Actions endpoints for push runs; the commit-workflow convenience tool currently filters to PR runs. Verify responses and remote content; uploading code does not mean CI passed. Use the local shell and committed harnesses for routine work. Do not assume Claude-specific DevTools, Context7, profiling or mobile-build MCP tools exist; discover exposed capabilities. Consult primary documentation when changing WebGPU/WGSL or platform behavior.
+
+Priorities: independent renderer/reference discrepancies, full VR4300 FPU rounding/exception conformance, browser failure/lifecycle coverage, physical devices, and recorded-input coverage for Smash/World Driver. `THIRD_PARTY.md` records provenance; do not bundle the external oracle or claim a verified license chain where it remains unresolved.

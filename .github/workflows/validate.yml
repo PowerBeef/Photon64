@@ -26,3 +26,26 @@ jobs:
           path: |
             out/homebrew.json
             out/photon64.html
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: tools/setup.sh
+      - run: npx playwright install --with-deps chromium
+      - name: Build the self-contained app
+        run: . out/env.sh && npm run build
+      - name: Check browser persistence and lifecycle with a shipped fixture
+        run: node tools/browsercheck.mjs testroms/RSPCP2VRCP.N64
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-evidence
+          path: out/browsercheck.png

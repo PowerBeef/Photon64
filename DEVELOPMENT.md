@@ -36,7 +36,7 @@ node tools/romcheck.mjs roms --frames 1200 --output out/commercial-1200.json
 
 The manifest records source revision/dirty state, WASM SHA256, runtime, ROM identities, frames, statistics and two-run memory/audio hashes. PASS here means deterministic software execution only. `tools/run_wasm.mjs` remains a diagnostic timing utility. Recorded input scripts exist for Mario, GoldenEye, Perfect Dark and Mario Kart; Smash and World Driver currently have smoke coverage only.
 
-CI automatically executes the baseline and shipped screenshot-reference gate on push/PR. Any existing reference discrepancy intentionally makes the workflow fail. Repository branch-protection settings are managed separately; adding a workflow does not enforce required checks in settings.
+CI automatically executes the baseline and shipped screenshot-reference gate on push/PR. An independent browser job installs Chromium and runs persistence/lifecycle checks with a shipped homebrew fixture, without commercial ROMs. Any existing reference discrepancy intentionally makes the workflow fail. Repository branch-protection settings are managed separately; adding a workflow does not enforce required checks in settings.
 
 See `IMPLEMENTATION_PLAN.md` for remaining FPU, renderer/reference, browser lifecycle and device-matrix work. See `THIRD_PARTY.md` for fixture and reference provenance.
 
