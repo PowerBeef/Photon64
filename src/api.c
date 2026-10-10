@@ -64,7 +64,7 @@ static u32 xpak_size(void) { return xpak_mode == 1 ? RDRAM_MAX : xpak_mode == 2 
 
 int n64_load_rom(u8 *data, u32 size) {
   if (size < 0x1000) return 0;
-  u32 magic = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+  u32 magic = ((u32)data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
   size &= ~3u;
   if (magic == 0x80371240) { for (u32 i = 0; i < size; i += 4) { u8 a = data[i], b = data[i + 1]; data[i] = data[i + 3]; data[i + 1] = data[i + 2]; data[i + 2] = b; data[i + 3] = a; } }
   else if (magic == 0x37804012) { for (u32 i = 0; i < size; i += 4) { u8 a = data[i], b = data[i + 1]; data[i] = data[i + 2]; data[i + 1] = data[i + 3]; data[i + 2] = a; data[i + 3] = b; } }
@@ -113,6 +113,16 @@ EXPORT(n64_alloc) void *n64_alloc(u32 size) {
   u32 pages = __builtin_wasm_memory_size(0);
   if (end > pages * 65536u) { if (__builtin_wasm_memory_grow(0, (end - pages * 65536u + 65535) / 65536) == (size_t)-1) return 0; }
   heap_top = end;
+  return (void *)(uintptr_t)p;
+}
+// The frontend owns one cartridge at a fixed address. Grow its capacity without
+// moving it or overwriting the previous bytes if memory.grow fails.
+EXPORT(n64_reserve_rom) void *n64_reserve_rom(u32 size) {
+  if (!size || size > 64u * 1024 * 1024) return 0;
+  u32 p = HEAP_START + HOST_SCRATCH_WORDS * 4;
+  u32 end = (p + size + 0xFFFF) & ~0xFFFFu, pages = __builtin_wasm_memory_size(0);
+  if (end > pages * 65536u && __builtin_wasm_memory_grow(0, (end - pages * 65536u) / 65536u) == (size_t)-1) return 0;
+  if (heap_top < end) heap_top = end;
   return (void *)(uintptr_t)p;
 }
 EXPORT(n64_free_all) void n64_free_all(void) { heap_top = 0; }
@@ -192,7 +202,7 @@ EXPORT(n64_config) void n64_config(u32 key, u32 value) {
     case 1: cpu.cpi = value ? value : 4; break;
     case 2: if (value < 4) sys.pad_present[value] = 1; break;
     case 3: if (value < 4) sys.pad_present[value] = 0; break;
-    case 4: sys.save_type = value; break;
+    case 4: if (value <= SAVE_FLASH) sys.save_type = value; break;
     case 5: sys.pak[0] = value; break;
     case 6: rdp_flush(); break;
     case 7: rdp_flush(); rdp_hd_mode = value; break;
@@ -201,6 +211,7 @@ EXPORT(n64_config) void n64_config(u32 key, u32 value) {
       vi_status_clear = value ? 0x314 : 0; vi_status_set = value ? 0x300 : 0;
       break;                    // 0: never stop for GPU copy-backs (the CPU sees old framebuffer contents)     // conservative binning for the high-resolution GPU pass
     case 10: xpak_mode = value; if (sys.rom) rdram_next = xpak_size(); break;   // Expansion Pak; like the real thing it only changes with the power off (next reset)
+    case 11: if ((value >> 8) < 4 && (value & 255) <= 2) sys.pak[value >> 8] = value & 255; break;
     default: break;
   }
 }

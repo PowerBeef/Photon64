@@ -21,13 +21,16 @@ void host_gpu_flush(void) {
   array("bins", b_bins, b_info.bins_words);
   sw_render_batch();
   u32 expected[64];
-  for (u32 i = 0; i < 64; i++) { u32 k = b_info.fb_addr * (b_info.fb_fmt == FB_8888 ? 2 : 1) + i; expected[i] = VRAM16(k) | (hidden_get(k) << 16); }
+  for (u32 i = 0; i < 64; i++) { u32 k = (b_info.fb_addr * (b_info.fb_fmt == FB_8888 ? 2 : 1) + i) & M16; expected[i] = VRAM16(k) | (hidden_get(k) << 16); }
   array("expected", expected, 64);
+  for (u32 i = 0; i < 64; i++) { u32 k = (b_info.depth_addr + i) & M16; expected[i] = VRAM16(k) | (hidden_get(k) << 16); }
+  array("depth", expected, 64);
   printf("\"feedback\":["); for (int i = 0; i < 12; i++) printf("%s%d", i ? "," : "", pipeline_feedback[i]); puts("]}");
 }
 int main(void) {
   sys.rdram_size = RDRAM_MAX; cpu_reset(); rdp_reset(); rdp_gpu_mode = 1;
   puts("[");
   for (u32 i = 0; i < sizeof renderer_vectors / sizeof *renderer_vectors; i++) rdp_exec(renderer_vectors[i]);
+  for (u32 i = 0; i < sizeof boundary_vectors / sizeof *boundary_vectors; i++) rdp_exec(boundary_vectors[i]);
   rdp_flush(); puts("]"); return !batches;
 }

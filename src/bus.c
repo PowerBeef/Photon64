@@ -132,7 +132,7 @@ static u32 cart_read32(u32 pa) {
   }
   if (pa >= 0x08000000 && pa < 0x10000000) {
     if (sys.save_type == SAVE_FLASH) return (u32)(sys.fl_status >> 32);
-    if (sys.save_type == SAVE_SRAM) { u32 o = pa & 0x7FFC; return (savemem[o] << 24) | (savemem[o + 1] << 16) | (savemem[o + 2] << 8) | savemem[o + 3]; }
+    if (sys.save_type == SAVE_SRAM) { u32 o = pa & 0x7FFC; return ((u32)savemem[o] << 24) | (savemem[o + 1] << 16) | (savemem[o + 2] << 8) | savemem[o + 3]; }
     return 0;
   }
   return pi_open_bus(pa);
@@ -309,7 +309,10 @@ static void joybus(int ch, u32 tx, u32 rx, u8 *cmd, u8 *res, u8 *rxp) {
   (void)tx;
 }
 
+#include "cic.h"
+
 static void pif_process(void) {
+  if (sys.pif_challenge) return; // challenge bytes are not Joybus packets
   u8 *r = sys.pif;
   int ch = 0, i = 0;
   while (i < 63 && ch < 6) {
@@ -330,7 +333,10 @@ static void pif_process(void) {
 
 static void pif_control(void) {
   u8 c = sys.pif[63];
-  if (c & 0x02) {  // CIC challenge/response: not emulated, acknowledge
+  sys.pif_challenge = !!(c & 0x02);
+  if (c & 0x02) {
+    cic_challenge(sys.pif + 0x30, sys.cic == 6105);
+    sys.pif[0x2E] = sys.pif[0x2F] = 0;
     sys.pif[63] &= ~0x02;
   }
   if (c & 0x08) sys.pif[63] &= ~0x08;
@@ -397,7 +403,7 @@ u32 bus_read32(u32 pa) {
     return *(u32 *)(sys.isv + (pa & 0xFFFC));
   }
   if (pa >= 0x05000000 && pa < 0x1FC00000) { sys.pi[1] = (pa & ~1u) + 4; return cart_read32(pa & ~1u); }
-  if (pa >= 0x1FC007C0 && pa < 0x1FC00800) { u8 *p = sys.pif + (pa & 0x3C); return (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]; }
+  if (pa >= 0x1FC007C0 && pa < 0x1FC00800) { u8 *p = sys.pif + (pa & 0x3C); return ((u32)p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]; }
   return 0;
 }
 
@@ -525,7 +531,7 @@ void bus_write32(u32 pa, u32 v, u32 mask) {
   }
   if (pa >= 0x1FC007C0 && pa < 0x1FC00800) {
     u8 *p = sys.pif + (pa & 0x3C);
-    u32 old = (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
+    u32 old = ((u32)p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
     u32 nv = (old & ~mask) | (v & mask);
     p[0] = nv >> 24; p[1] = nv >> 16; p[2] = nv >> 8; p[3] = nv;
     pif_control();
@@ -549,11 +555,11 @@ static u32 crc32_calc(const u8 *d, u32 n) {
 static u32 frame_paused;      // n64_run_frame() stopped part-way through a field
 u32 rdram_next;                // amount of RDRAM the machine has from the next reset on (0: leave as it is)
 void sys_reset(void) {
-  u8 *rom = sys.rom; u32 rom_size = sys.rom_size, save_type = sys.save_type, rdsz = sys.rdram_size;
+  u8 *rom = sys.rom; u32 rom_size = sys.rom_size, save_type = sys.save_type, dirty = sys.save_dirty, rdsz = sys.rdram_size;
   u32 pres[4], pak[4];
   for (int i = 0; i < 4; i++) { pres[i] = sys.pad_present[i]; pak[i] = sys.pak[i]; }
   memset(&sys, 0, sizeof sys);
-  sys.rom = rom; sys.rom_size = rom_size; sys.save_type = save_type;
+  sys.rom = rom; sys.rom_size = rom_size; sys.save_type = save_type; sys.save_dirty = dirty;
   sys.rdram_size = rdram_next ? rdram_next : rdsz ? rdsz : RDRAM_MAX;
   for (int i = 0; i < 4; i++) { sys.pad_present[i] = pres[i]; sys.pak[i] = pak[i]; }
   memset(rdram, 0, RDRAM_MAX);
@@ -589,7 +595,7 @@ void sys_reset(void) {
     }
   }
   // state left by IPL1/IPL2
-  memcpy(spmem, rom, rom_size < 0x1000 ? rom_size : 0x1000);
+  if (rom_size) memcpy(spmem, rom, rom_size < 0x1000 ? rom_size : 0x1000);
   static const u32 imem_boot[8] = { 0x3C0DBFC0, 0x8DA807FC, 0x25AD07C0, 0x31080080, 0x5500FFFC, 0x3C0DBFC0, 0x8DA80024, 0x3C0BB000 };
   memcpy(spmem + 0x1000, imem_boot, sizeof imem_boot);
   cpu.r[11] = (s64)(s32)0xA4000040;

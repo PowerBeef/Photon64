@@ -117,6 +117,14 @@ int main(void) {
   }
   check(tot_bad == 0 && tot_zbad == 0);
   check(touched_color_bad == 0 && touched_depth_bad == 0 && touched_hidden_bad == 0);
+  if (getenv("RDP_BOUNDARY_DIAGNOSTIC")) {
+    for (u32 i = 0; i < sizeof boundary_vectors / sizeof *boundary_vectors; i++) {
+      u32 count = rdp_len[(boundary_vectors[i][0] >> 24) & 63] * 2;
+      hook_command(boundary_vectors[i], count); rdp_exec(boundary_vectors[i]); hook_post();
+    }
+    printf("boundary model diagnostic: color=%llu depth=%llu hidden=%llu (known unresolved address-window difference)\n", touched_color_bad, touched_depth_bad, touched_hidden_bad);
+    return touched_color_bad || touched_depth_bad || touched_hidden_bad ? 1 : 0;
+  }
   touched_color_bad = touched_depth_bad = touched_hidden_bad = 0;
   // Mutation sensitivity: an earlier/offscreen byte, a RAM-end wrap and a
   // hidden-only mismatch must remain counted independently of the current FB.

@@ -265,12 +265,12 @@ static u32 comb_const(int cyc, int slot) {
     case 0: if (r == 3) rgb = prim; else if (r == 5) rgb = env; break;
     case 1:
       if (r == 3) rgb = prim; else if (r == 5) rgb = env;
-      else if (r == 6) rgb = (rdp.key_center[0] << 24) | (rdp.key_center[1] << 16) | (rdp.key_center[2] << 8);
+      else if (r == 6) rgb = ((u32)rdp.key_center[0] << 24) | (rdp.key_center[1] << 16) | (rdp.key_center[2] << 8);
       else if (r == 7) rgb = ((u32)rdp.convert[4] & 0x1FF) << 8;
       break;
     case 2:
       if (r == 3) rgb = prim; else if (r == 5) rgb = env;
-      else if (r == 6) rgb = (rdp.key_scale[0] << 24) | (rdp.key_scale[1] << 16) | (rdp.key_scale[2] << 8);
+      else if (r == 6) rgb = ((u32)rdp.key_scale[0] << 24) | (rdp.key_scale[1] << 16) | (rdp.key_scale[2] << 8);
       else if (r == 10) rgb = 0x01010100u * (prim & 0xFF);
       else if (r == 12) rgb = 0x01010100u * (env & 0xFF);
       else if (r == 14) rgb = 0x01010100u * (rdp.prim_lod_frac & 0xFF);

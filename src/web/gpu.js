@@ -13,7 +13,44 @@
 const FB_WORDS = 0x400000, RDRAM_MASK = 0x7FFFFF;
 const AA_W = 656, AA_H = 592, OUT_W = 640, OUT_H = 576;
 
+// Circular halfword intervals; callers receive nonwrapping bounded segments.
+function gpuRanges(idx, count) {
+  if (!Number.isSafeInteger(idx) || !Number.isSafeInteger(count)) throw new Error('Invalid GPU range');
+  if (count <= 0) return [];
+  if (count >= FB_WORDS) return [[0, FB_WORDS]];
+  idx = ((idx % FB_WORDS) + FB_WORDS) % FB_WORDS;
+  const tail = Math.min(count, FB_WORDS - idx);
+  return count > tail ? [[idx, tail], [0, count - tail]] : [[idx, tail]];
+}
 class N64Gpu {
+  fail(error, phase) {
+    const event = { at: Date.now(), phase, message: String(error.message || error).slice(0, 512), generation: this.generation || 0, scale: this.scaleLog2 || 0, batch: this.stats?.batches || 0 };
+    if (!this.firstError) this.firstError = event;
+    (this.errors ||= []).push(event); if (this.errors.length > 32) this.errors.shift();
+    this.readbackError ||= error instanceof Error ? error : new Error(event.message);
+    this.onError?.(this.readbackError);
+  }
+  diagnostics() { return { adapter: this.adapter ? { vendor: this.adapter.info?.vendor, architecture: this.adapter.info?.architecture, device: this.adapter.info?.device, description: this.adapter.info?.description, fallback: this.adapter.info?.isFallbackAdapter ?? this.adapter.isFallbackAdapter } : {}, scale: this.scaleLog2 || 0, requestedScale: this.scaleWant || 0, lost: !!this.lost, pending: this.pending || 0, completed: this.done || 0, firstError: this.firstError || null, errors: this.errors || [], stats: this.stats || {}, targetBytes: FB_WORDS * 4 + (this.hd ? this.hdWords * 4 * this.hd.S * this.hd.S : 0) }; }
+  submit(encoder, phase) {
+    const d = this.device, generation = this.generation;
+    // Pop immediately, before any await, so concurrent callers cannot steal scopes.
+    d.pushErrorScope?.('validation');
+    try { d.queue.submit([encoder.finish()]); } catch (e) { this.fail(e, phase); throw e; }
+    finally { if (d.popErrorScope) {
+      const checked = d.popErrorScope().then(e => { if (e && generation === this.generation) { this.fail(e, phase); throw new Error(e.message); } });
+      this.validationTail = Promise.all([this.validationTail || Promise.resolve(), checked]); this.validationTail.catch(() => {});
+    } }
+  }
+  destroySet(set) { if (!set) return; if (set.hd) set.target?.destroy(); set.feedbackBuf?.destroy(); set.aaTex?.destroy(); set.outTex?.destroy(); }
+  dispose() {
+    this.scaleSeq = (this.scaleSeq || 0) + 1; this.disposed = true;
+    for (const j of this.inflight || []) j.dead = true;
+    for (const b of this.pool || []) b.destroy();
+    for (const set of this.hdSets?.values() || []) this.destroySet(set);
+    this.destroySet(this.native);
+    for (const key of ['fbBuf','primsBuf','spansBuf','tablesBuf','tmemBuf','binsBuf','stageBuf','ubuf','mergeUbuf','viUbuf']) this[key]?.destroy();
+    this.ctx?.unconfigure();
+  }
   // tiny preprocessor for the WGSL sources:  //#if HD ... //#else ... //#endif   and  __HD_L__
   static pp(src, hd, L, mask) {
     const out = []; const st = [];
@@ -44,7 +81,7 @@ class N64Gpu {
     try { device = await adapter.requestDevice({ requiredLimits }); } catch (e) { device = await adapter.requestDevice(); }
     const g = new N64Gpu();
     g.adapter = adapter;
-    await g.init(device, core, canvas, shaders);
+    try { await g.init(device, core, canvas, shaders); } catch (e) { g.dispose(); device.destroy(); throw e; }
     return g;
   }
 
@@ -70,6 +107,7 @@ class N64Gpu {
         fragment: { module: viMod, entryPoint: 'fs_scale', targets: [{ format: 'rgba8unorm' }] }, primitive: tri }),
     ]);
     const set = { hd, L, S, rdp, merge, aa, scale };
+    try {
     const bufE = (binding, buffer) => ({ binding, resource: { buffer } });
     set.target = hd ? device.createBuffer({ size: this.hdWords * 4 * S * S, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }) : this.fbBuf;
     set.aaTex = device.createTexture({ size: [AA_W * S, AA_H * S], format: 'rgba8uint', usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING });
@@ -96,10 +134,14 @@ class N64Gpu {
       entries: [bufE(0, this.viUbuf), { binding: 3, resource: set.outView }, { binding: 4, resource: s }] }));
     set.lastOutH = 0;
     return set;
+    } catch (e) { this.destroySet(set); throw e; }
   }
 
   async init(device, core, canvas, shaders) {
     this.device = device; this.core = core; this.ex = core.ex; this.mem = core.ex.memory; this.canvas = canvas; this.shaders = shaders;
+    this.lost = false; this.errors = [];
+    device.addEventListener?.('uncapturederror', e => this.fail(e.error, 'uncaptured'));
+    device.lost.then(info => { this.lost = true; this.fail(new Error('GPU device lost: ' + (info.message || info.reason)), 'device-lost'); this.onLost?.(info); });
     const ex = this.ex;
     const hi = new Uint32Array(this.mem.buffer, ex.n64_host_info(), 24);
     const sp = new Uint32Array(this.mem.buffer, ex.n64_sync_ptrs(), 8);
@@ -147,17 +189,24 @@ class N64Gpu {
     this.speculate = 0;                   // > 0 while the game has recently asked for GPU results
     this.viU = new ArrayBuffer(144); this.viU32 = new Uint32Array(this.viU); this.viF32 = new Float32Array(this.viU);
     this.stats = { batches: 0, uploads: 0, merges: 0, readbacks: 0, syncs: 0, waits: 0, late: 0 };
-    this.lost = false; this.pending = 0; this.done = 0;
-    device.lost.then(info => { this.lost = true; this.readbackError = new Error('GPU device lost: ' + (info.message || info.reason)); if (this.onLost) this.onLost(info); });
+    this.pending = 0; this.done = 0;
+
     // (nothing here switches the core to GPU rendering: the owner calls reset() when it wants that)
   }
 
   // Select the internal resolution: 0 = native (exact), 1 = 2x, 2 = 4x. Builds the pipelines on first use.
   // hdTest: build the "HD" code path at 1x (used to validate the in-shader span setup against the native pass).
-  async setScale(L, hdTest) {
-    L = Math.min(L | 0, this.maxScaleLog2);
+  setScale(L, hdTest) {
     const seq = this.scaleSeq = (this.scaleSeq | 0) + 1;
-    const free = keep => { for (const [k, s] of this.hdSets) if (k !== keep) { s.feedbackBuf.destroy(); s.target.destroy(); s.aaTex.destroy(); s.outTex.destroy(); this.hdSets.delete(k); } };
+    const result = (this.scaleTail || Promise.resolve()).then(() => {
+      if (seq !== this.scaleSeq || this.disposed) return this.scaleLog2 | 0;
+      return this.activateScale(L, hdTest, seq);
+    });
+    this.scaleTail = result.catch(() => {}); return result;
+  }
+  async activateScale(L, hdTest, seq) {
+    L = Math.min(L | 0, this.maxScaleLog2);
+    const free = keep => { for (const [k, s] of this.hdSets) if (k !== keep) { this.destroySet(s); this.hdSets.delete(k); } };
     if (!L && !hdTest) {
       this.ex.n64_config(7, 0);       // (flushes what is pending while the high-resolution copy is still attached)
       this.hd = null; this.scaleLog2 = 0; free(-1);
@@ -169,19 +218,19 @@ class N64Gpu {
       this.device.pushErrorScope('out-of-memory'); this.device.pushErrorScope('validation');
       let err = null;
       try { set = await this.buildSet(true, L); } catch (e) { err = e; }
-      const e1 = await this.device.popErrorScope(), e2 = await this.device.popErrorScope();
+      const [e1, e2] = await Promise.all([this.device.popErrorScope(), this.device.popErrorScope()]);
       err = err || e1 || e2;
       if (err || seq !== this.scaleSeq) {
-        if (set) { set.feedbackBuf.destroy(); set.target.destroy(); set.aaTex.destroy(); set.outTex.destroy(); }
+        this.destroySet(set);
         if (err) throw new Error(err.message || String(err));
         return this.scaleLog2 | 0;     // superseded by a newer request
       }
       this.hdSets.set(L, set);
     }
-    free(L);
     this.ex.n64_config(7, 1);
     this.hd = set; this.scaleLog2 = L;
     this.fillHd();
+    free(L);
     return L;
   }
 
@@ -193,7 +242,7 @@ class N64Gpu {
     enc.copyBufferToBuffer(this.native.feedbackBuf, 0, set.feedbackBuf, 0, 48);
     const pass = enc.beginComputePass();
     pass.setPipeline(set.fill); pass.setBindGroup(0, set.fillBG); pass.dispatchWorkgroups(FB_WORDS / 256); pass.end();
-    q.submit([enc.finish()]);
+    this.submit(enc, 'render');
   }
 
   // staged halfwords -> GPU (and the high-resolution copy when active)
@@ -203,7 +252,7 @@ class N64Gpu {
     q.writeBuffer(this.mergeUbuf, 0, new Uint32Array([idx, count, FB_WORDS - 1, 0]));
     const enc = this.device.createCommandEncoder(), pass = enc.beginComputePass();
     pass.setPipeline(set.merge); pass.setBindGroup(0, set.mergeBG); pass.dispatchWorkgroups(Math.ceil(count / 256)); pass.end();
-    q.submit([enc.finish()]);
+    this.submit(enc, 'render');
     this.stats.merges++;
   }
 
@@ -215,6 +264,8 @@ class N64Gpu {
   reset() {
     if (this.lost) throw this.readbackError || new Error('GPU device lost');
     this.generation = (this.generation || 0) + 1;
+    this.scaleSeq = (this.scaleSeq || 0) + 1; this.scaleWant = undefined;
+    this.validationTail = Promise.resolve();
     for (const j of this.inflight) j.dead = true;
     this.readbackError = null; this.tail = Promise.resolve();
     this.ex.n64_config(0, 1); this.ex.n64_config(8, this.exact ? 1 : 0); this.ex.n64_config(7, this.hd ? 1 : 0);   // (a loaded save state may carry other settings)
@@ -233,13 +284,9 @@ class N64Gpu {
 
   // push CPU-side changes of halfwords [idx, idx + count) to the GPU
   syncRange(idx, count) {
-    if (idx < 0) { count += idx; idx = 0; }
-    count = Math.min(count, FB_WORDS - idx);
-    if (count <= 0) return;
     if (!Number.isInteger(this.p.syncMax) || this.p.syncMax <= 0) throw new Error('Invalid sync capacity');
-    while (count > 0) {
-      const n = Math.min(count, this.p.syncMax);
-      this.syncChunk(idx, n); idx += n; count -= n;
+    for (let [start, n] of gpuRanges(idx, count)) {
+      while (n > 0) { const chunk = Math.min(n, this.p.syncMax); this.syncChunk(start, chunk); start += chunk; n -= chunk; }
     }
   }
   syncChunk(idx, count) {
@@ -298,21 +345,33 @@ class N64Gpu {
         pass.dispatchWorkgroups(1); pass.end();
       }
     }
-    q.submit([enc.finish()]);
+    this.submit(enc, 'render');
     this.stats.batches++;
-    if (ordered) this.stats.orderedBatches = (this.stats.orderedBatches || 0) + 1;
+    this.stats.maxPrimitives = Math.max(this.stats.maxPrimitives || 0, np);
+    this.stats.maxTargetPixels = Math.max(this.stats.maxTargetPixels || 0, pixels);
+    this.stats.uploadBytes = (this.stats.uploadBytes || 0) + 80 + np * 288 + (ns + 1) * 32 + nst * 64 + nts * 256 + ntm * 4096 + binsWords * 4;
+    if (ordered) {
+      this.stats.orderedBatches = (this.stats.orderedBatches || 0) + 1;
+      let samples = 0;
+      const prim = this.p.b_prims >> 2, span = this.p.b_spans >> 2;
+      for (let i = 0; i < np; i++) {
+        const p = prim + i * 72, rows = Math.max(0, (u32[p+3] | 0) - (u32[p+2] | 0) + 1);
+        for (let j = 0; j < rows; j++) { const sp = span + (u32[p+1] + j) * 8, x = u32[sp+4]; if (u32[sp+7] & 1) samples += Math.max(0, (x >>> 16) - (x & 65535) + 1); }
+      }
+      this.stats.orderedNativeSamples = (this.stats.orderedNativeSamples || 0) + samples;
+      this.stats.maxOrderedSamples = Math.max(this.stats.maxOrderedSamples || 0, samples);
+    }
     this.touch(cIdx, cCnt);
     if (!u32[bi + 13] && (zUse & 2)) this.touch(depth, pixels);
   }
   touch(idx, count) {
-    count = Math.min(count, FB_WORDS - idx);
-    if (count > 0 && (this.touched.get(idx) | 0) < count) this.touched.set(idx, count);
+    for (const [start, n] of gpuRanges(idx, count)) if ((this.touched.get(start) || 0) < n) this.touched.set(start, n);
   }
 
   // asynchronous GPU -> CPU copy of what has been rendered since the last one (as much as fits in one go)
   startReadback() {
     if (this.readbackError) throw this.readbackError;
-    if (!this.touched.size) return;
+    if (!this.touched.size || this.inflight.length >= 2) return;
     const regs = []; let total = 0;
     for (const [idx, cnt0] of this.touched) {
       const cnt = Math.min(cnt0, this.scratchWords);
@@ -331,13 +390,13 @@ class N64Gpu {
       const enc = this.device.createCommandEncoder();
       for (const r of regs) enc.copyBufferToBuffer(this.fbBuf, r.idx * 4, sb, r.off * 4, r.cnt * 4);
       enc.copyBufferToBuffer(this.native.feedbackBuf, 0, sb, feedbackOffset, 48);
-      this.device.queue.submit([enc.finish()]);
+      this.submit(enc, 'readback');
     } catch (error) {
       if (sb) sb.destroy();
       for (const r of regs) this.touch(r.idx, r.cnt);
       this.readbackError = error; throw error;
     }
-    const job = { regs, excl: [], dead: false };
+    const job = { regs, excl: [], dead: false, started: performance.now() };
     this.inflight.push(job);
     // (results are applied strictly in the order the snapshots were taken, whatever order the maps complete in)
     const prev = this.tail || Promise.resolve();
@@ -366,12 +425,12 @@ class N64Gpu {
           }
           for (const [s, e] of segs) this.ex.n64_readback_apply(s, e - s, this.scratch + (r.off + s - r.idx) * 4);
         }
-        this.stats.readbacks++; reusable = true;
+        this.stats.readbacks++; this.stats.readbackBytes = (this.stats.readbackBytes || 0) + bytes; this.stats.readbackMs = (this.stats.readbackMs || 0) + performance.now() - job.started; reusable = true;
       }
     }).catch(error => {
       if (!job.dead) {
         for (const r of regs) this.touch(r.idx, r.cnt);
-        this.readbackError = error;
+        this.fail(error, 'map');
         throw error;
       }
     }).finally(() => {
@@ -426,11 +485,15 @@ class N64Gpu {
       const p3 = enc.beginRenderPass({ colorAttachments: [{ view: this.ctx.getCurrentTexture().createView(), loadOp: 'clear', clearValue: [0, 0, 0, 1], storeOp: 'store' }] });
       p3.setPipeline(this.blitPipe); p3.setBindGroup(0, set.blitBG[this.filter === 0 ? 1 : 0]); p3.draw(4); p3.end();
     }
-    q.submit([enc.finish()]);
+    this.submit(enc, 'render');
     if (this.speculate > 0) { this.speculate--; this.startReadback(); }   // (also covers what the end of the field flushed)
     // back-pressure signal for the main loop: how many presented frames the GPU has not finished yet
-    this.pending++;
-    q.onSubmittedWorkDone().then(() => { this.pending--; this.done++; }, () => { this.pending--; this.done++; });
+    this.pending++; const submittedAt = performance.now();
+    q.onSubmittedWorkDone().then(() => { this.pending--; this.done++;
+      const elapsed = performance.now() - submittedAt;
+      (this.queueSamples ||= []).push(elapsed); if (this.queueSamples.length > 256) this.queueSamples.shift();
+      this.stats.maxQueueCompletionMs = Math.max(this.stats.maxQueueCompletionMs || 0, elapsed);
+    }, error => { this.pending--; this.fail(error, 'queue-completion'); });
   }
 
   // Bring emulated RDRAM fully up to date with the GPU: called when the core stops because the game is about to
@@ -448,6 +511,8 @@ class N64Gpu {
       if (generation !== this.generation) throw new Error('Obsolete renderer barrier');
     }
     if (this.readbackError) throw this.readbackError;
+    if (this.validationTail) await this.validationTail;
+    if (this.readbackError) throw this.readbackError;
     this.ex.n64_sync_done();
     this.stats.syncs++;
     this.speculate = 600;
@@ -457,25 +522,27 @@ class N64Gpu {
   // ---- debugging / test helpers ----
   async readBuf(src, offset, bytes) {
     const sb = this.device.createBuffer({ size: bytes, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    try {
     const enc = this.device.createCommandEncoder();
     enc.copyBufferToBuffer(src, offset, sb, 0, bytes);
-    this.device.queue.submit([enc.finish()]);
+    this.submit(enc, 'readback');
     await sb.mapAsync(GPUMapMode.READ);
     const out = new Uint32Array(sb.getMappedRange()).slice();
-    sb.unmap(); sb.destroy();
     return out;
+    } finally { sb.unmap(); sb.destroy(); }
   }
   readFb(idx, count) { return this.readBuf(this.fbBuf, idx * 4, count * 4); }
   readHd(idx, count) { const set = this.hd; if (!set) throw new Error('readHd needs an HD set (call setScale first)'); const n = set.S * set.S; return this.readBuf(set.target, (idx & (this.hdWords - 1)) * 4 * n, count * 4 * n); }
   async readOutput() {
     const set = this.hd || this.native, S = set.S, h = (this.outH || 240) * S, w = OUT_W * S;
     const sb = this.device.createBuffer({ size: w * 4 * h, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    try {
     const enc = this.device.createCommandEncoder();
     enc.copyTextureToBuffer({ texture: set.outTex }, { buffer: sb, bytesPerRow: w * 4 }, [w, h]);
-    this.device.queue.submit([enc.finish()]);
+    this.submit(enc, 'readback');
     await sb.mapAsync(GPUMapMode.READ);
     const out = new Uint8Array(sb.getMappedRange()).slice();
-    sb.unmap(); sb.destroy();
     return { data: out, width: w, height: h };
+    } finally { sb.unmap(); sb.destroy(); }
   }
 }

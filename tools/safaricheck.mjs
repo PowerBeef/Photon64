@@ -17,12 +17,21 @@ const port = +(process.env.SAFARI_DRIVER_PORT || 5001), driver = spawn('/usr/bin
 driver.stdout.on('data', b => report.driverLog += b); driver.stderr.on('data', b => report.driverLog += b);
 let driverError; driver.on('error', e => { driverError = e; });
 const delay = ms => new Promise(r => setTimeout(r, ms));
-let session;
+let session, phase = 'driver-start', diagnostic = false;
+const deadline = Date.now() + +(process.env.SAFARI_BUDGET_MS || 360000);
+report.journal = [];
+function checkpoint() { fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(report, null, 2) + '\n'); }
+function mark(label) { phase = label; report.phase = label; checkpoint(); }
+
 async function command(method, endpoint, body) {
-  const res = await fetch(`http://127.0.0.1:${port}${endpoint}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(90000) });
+  const item = { phase, method, endpoint, script: body?.script?.slice(0, 160), started: new Date().toISOString() };
+  report.journal.push(item); checkpoint();
+  try {
+  const res = await fetch(`http://127.0.0.1:${port}${endpoint}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(diagnostic ? 2500 : Math.max(1, Math.min(20000, deadline - Date.now()))) });
   const data = await res.json();
   if (!res.ok || data.value?.error) throw new Error(endpoint + ': ' + JSON.stringify(data));
-  return data.value;
+  item.finished = new Date().toISOString(); return data.value;
+  } catch (e) { item.error = String(e); throw e; } finally { checkpoint(); }
 }
 const cmd = (method, endpoint, body) => command(method, `/session/${session}${endpoint}`, body);
 const evaluate = (fn, arg = null) => cmd('POST', '/execute/sync', { script: `return (${fn.toString()})(arguments[0]);`, args: [arg] });
@@ -38,7 +47,8 @@ async function evaluateAsync(fn, arg = null) {
   if (result.error) throw Error(result.error); return result.value;
 }
 async function wait(fn) {
-  for (let n = 0; n < 120; n++) { if (await evaluate(fn)) return; await delay(250); }
+  const until = Math.min(deadline, Date.now() + 30000);
+  while (Date.now() < until) { if (await evaluate(fn)) return; await delay(250); }
   throw Error('Timed out: ' + fn.toString());
 }
 async function click(selector) {
@@ -85,18 +95,20 @@ try {
   }
   console.log('Safari independent file probe:', JSON.stringify(report.filesystemUpload));
   await evaluate(() => document.getElementById('driver-file-probe').remove());
-  for (const [name, width, height] of [['narrow', 390, 844], ['landscape', 1000, 500], ['desktop', 1000, 740]]) {
+  for (const [name, width, height] of [['narrow', 390, 844], ['landscape', 1000, 500], ['desktop', 1000, 740]].filter(([n]) => !process.env.SAFARI_CASES || process.env.SAFARI_CASES.split(',').includes(n))) {
+    mark(name + '/start');
     await cmd('POST', '/window/rect', { x: 0, y: 0, width, height }); await delay(500);
     const row = { name, requestedWindow: [width, height], phases: [] }; report.cases.push(row);
-    const check = async phase => { const result = await evaluateAsync(auditUi); row.phases.push({ phase, ...result }); assert.deepEqual(result.errors, [], name + '/' + phase + ': ' + result.errors.join('; ')); };
+    const check = async label => { mark(name + "/" + label); const result = await evaluateAsync(auditUi); row.phases.push({ phase: label, ...result }); assert.deepEqual(result.errors, [], name + '/' + phase + ': ' + result.errors.join('; ')); };
     await check('library'); await click('#h-set'); await check('home-settings');
     await evaluate(() => document.querySelector('#pg-settings [data-nav=back]').focus());
     await key('\uE004', true); assert.ok(await evaluate(() => document.getElementById('sheet').contains(document.activeElement)));
     await key('\uE004'); assert.ok(await evaluate(() => document.activeElement.matches('#pg-settings [data-nav=back]')));
     await evaluate(() => document.getElementById('tab-video').focus()); await key('\uE014');
     assert.equal(await evaluate(() => document.getElementById('tab-console').getAttribute('aria-selected')), 'true');
+    const oldPak = await evaluate(() => +document.getElementById('s-pak').value);
     await evaluate(() => document.querySelector('#s-pak + .seg [aria-checked=true]').focus()); await key('\uE014');
-    assert.equal(await evaluate(() => document.getElementById('s-pak').value), name === 'narrow' ? '2' : name === 'landscape' ? '0' : '1');
+    assert.equal(await evaluate(() => document.getElementById('s-pak').value), ({1:'2',2:'0',0:'1'})[oldPak]);
     await key('\uE00C'); assert.ok(await evaluate(() => document.activeElement.id === 'h-set'));
     await evaluate(() => window.__photon.settings.renderer = 'sw');
     await evaluate(() => window.__uploadEvents = []);
@@ -133,8 +145,10 @@ try {
     }, fields), 'Resume must advance emulated fields');
     await check('stage');
     await click('#b-menu'); await click('#m-save'); await wait(() => document.querySelectorAll('#slots .slot').length === 4);
+    mark(name + '/state-slot-action');
     await click('#slots .slot:first-child'); await wait(() => document.getElementById('sheet').hidden);
     await click('#b-menu'); await click('#m-load'); await wait(() => document.querySelector('#slots .slot')?.disabled === false);
+    mark(name + '/state-slot-action');
     await click('#slots .slot:first-child'); await wait(() => document.getElementById('sheet').hidden);
     row.stateSlotClicks = 'PASS: saved and restored slot 1 through native WebDriver clicks';
     assert.equal(await evaluateAsync(async () => {
@@ -155,7 +169,7 @@ try {
   assert.deepEqual(await evaluate(() => window.__uiErrors), []);
   report.outcome = 'PASS'; console.log('PASS native Safari', report.capabilities.browserVersion);
 } catch (e) {
-  report.error = e.stack;
+  report.error = e.stack; report.firstFailure = { phase, command: report.journal.at(-1), driverExit: driver.exitCode, at: new Date().toISOString() }; diagnostic = true; checkpoint();
   if (session) {
     report.failureState = await evaluate(() => ({ rom: window.__photon?.rom?.name, running: window.__photon?.running, toast: document.getElementById('toast')?.textContent, fileValue: document.getElementById('file')?.value, files: [...(document.getElementById('file')?.files || [])].map(f => ({ name: f.name, size: f.size })), events: window.__uploadEvents, errors: window.__uiErrors })).catch(() => null);
     console.log('Safari failure state:', JSON.stringify(report.failureState));
@@ -163,4 +177,4 @@ try {
   }
   throw e;
 }
-finally { if (session) await cmd('DELETE', '').catch(() => {}); driver.kill(); server.close(); fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(report, null, 2) + '\n'); }
+finally { diagnostic = true; if (session) await cmd('DELETE', '').catch(() => {}); driver.kill(); server.close(); fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(report, null, 2) + '\n'); }

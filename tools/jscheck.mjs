@@ -56,7 +56,7 @@ const parts = [
 ];
 for (const p of parts) if (!p || p.length < 10) throw new Error('extraction failed');
 const factory = new Function('self', 'ex', 'rom', 'idbGet',
-  parts.join('\n') + '\nreturn { unzip, checkRomSize, u8v, u32v, stateMeta, MAX_ROM };');
+  'const idbHas = async k => !!(await idbGet(k));\n' + parts.join('\n') + '\nreturn { unzip, checkRomSize, u8v, u32v, stateMeta, MAX_ROM };');
 
 // --- minimal zip builder ---
 function zip(entries) {

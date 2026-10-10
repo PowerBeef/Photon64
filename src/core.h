@@ -115,6 +115,7 @@ typedef struct {
   u32 dp_start, dp_end, dp_current, dp_status, dp_clock, dp_bufbusy, dp_pipebusy, dp_tmem;
   // cart
   u8 *rom; u32 rom_size, rom_mask;
+  u32 pif_challenge;
   u32 cic, tv;             // tv: 0 PAL, 1 NTSC, 2 MPAL
   u32 rdram_size;
   u32 save_type;           // 0 none/auto, 1 eep4k, 2 eep16k, 3 sram, 4 flash

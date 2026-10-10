@@ -16,6 +16,7 @@ static void setup(u32 op) {
 }
 #include "fpu_vectors.h"
 #include "rdp_vectors.h"
+#include "cic_vectors.h"
 #define OP(fn) ((8u << 21) | (9u << 16) | (10u << 11) | (fn))
 EXPORT(run_tests) u32 run_tests(void) {
   checks = failures = first_failure = 0;
@@ -53,6 +54,40 @@ EXPORT(run_tests) u32 run_tests(void) {
     // Delay-slot fault records branch EPC, BD and original unaligned VA.
     setup((op << 26) | (8u << 21) | (9u << 16) | 3); cpu.r[8] = 0x4000; cpu.branch = 1; cpu_run();
     check((cpu.cp0[C0_CAUSE] & 0x80000000u) != 0); check((u32)cpu.cp0[C0_EPC] == 0x80000FFC);
+  }
+  // Original merge-load fault addresses, including delay slots and invalid TLBs.
+  const u32 merge_ops[] = {26, 27, 34, 38};
+  for (u32 k = 0; k < 4; k++) for (u32 off = 0; off < (k < 2 ? 8u : 4u); off++) for (u32 invalid = 0; invalid < 2; invalid++) for (u32 delay = 0; delay < 2; delay++) {
+    setup((merge_ops[k] << 26) | (8u << 21) | (9u << 16) | off); cpu.r[8] = 0x4000; cpu.branch = delay;
+    if (invalid) { cpu.tlb[0].hi = 0x4000; cpu.tlb[0].lo0 = 0; }
+    cpu_run(); check((u32)cpu.cp0[C0_BADVADDR] == 0x4000 + off);
+    check(((cpu.cp0[C0_CAUSE] >> 2) & 31) == EXC_TLBL);
+    check((u32)cpu.cp0[C0_EPC] == (delay ? 0x80000FFCu : 0x80001000u)); check(!!(cpu.cp0[C0_CAUSE] & 0x80000000u) == delay);
+  }
+  // Execute through a permitted user TLB page, then access forbidden segments.
+  for (u32 mode = 1; mode <= 2; mode++) for (u32 op = 35; op <= 43; op += 8) for (u32 segment = 0; segment < 3; segment++) {
+    setup((op << 26) | (8u << 21) | (9u << 16));
+    cpu.tlb[0] = (TLBEntry){ .hi = 0x4000, .lo0 = (1u << 6) | 7, .lo1 = 7, .g = 1 }; tlb_remap_all();
+    cpu.pc = 0x4000; cpu.npc = 0x4004; cpu.r[8] = (u32[]){0x80002000u,0xA0002000u,0xE0002000u}[segment]; cpu.cp0[C0_STATUS] = mode << 3;
+    cpu_run(); check(((cpu.cp0[C0_CAUSE] >> 2) & 31) == (op == 35 ? EXC_ADEL : EXC_ADES)); check((u32)cpu.cp0[C0_BADVADDR] == (u32)cpu.r[8]);
+  }
+  setup(0); cpu.cp0[C0_STATUS] = 16; cpu_run(); check(((cpu.cp0[C0_CAUSE] >> 2) & 31) == EXC_ADEL); check((u32)cpu.cp0[C0_BADVADDR] == 0x80001000u);
+  setup(0); gpu_exact = 1; gpu_watch_region(RDRAM_MAX / 2 - 2, 4); gpu_mark_stale(RDRAM_MAX / 2 - 2, 4);
+  check(gpu_watch[0] && gpu_watch[(RDRAM_MAX >> 12) - 1]); check(gpu_range_stale(0, 4)); check(gpu_range_stale(RDRAM_MAX - 4, 8)); check(!gpu_range_stale(16, 4));
+  gpu_mark_dirty(RDRAM_MAX - 3, 6); check((rdp_hidden[0] & 128) && (rdp_hidden[1] & 128) && (rdp_hidden[RDRAM_MAX / 2 - 1] & 128)); gpu_unwatch(1);
+  setup(0); sys.save_dirty = 7; eeprom[0] = 0xA5; sys_reset(); check(sys.save_dirty == 7 && eeprom[0] == 0xA5);
+  // Exercise high bytes through real ROM and cartridge/PIF/RSP packing.
+  static u8 small_rom[4096]; memset(small_rom, 0, sizeof small_rom); small_rom[0] = 0x80; small_rom[1] = 0x37; small_rom[2] = 0x12; small_rom[3] = 0x40;
+  check(n64_load_rom(small_rom, sizeof small_rom)); sys.save_type = SAVE_SRAM; savemem[0] = 0x80; check(cart_read32(0x08000000) == 0x80000000u);
+  sys.pif[0] = 0x80; check(bus_read32(0x1FC007C0) == 0x80000000u);
+  memset(DMEM, 0, 16); dm_w8(1, 0x80); check(dm_r32(1) == 0x80000000u);
+  for (u32 i = 0; i < sizeof cic_vectors / sizeof *cic_vectors; i++) {
+    memset(sys.pif, 0, 64); sys.cic = 6105; memcpy(sys.pif + 0x30, cic_vectors[i].input, 15); sys.pif[63] = 2; sys.pif[0x2E] = sys.pif[0x2F] = 0xFF;
+    pif_control(); check(memcmp(sys.pif + 0x30, cic_vectors[i].response, 15) == 0); check(sys.pif[63] == 0 && sys.pif[0x2E] == 0 && sys.pif[0x2F] == 0);
+    pif_process(); check(memcmp(sys.pif + 0x30, cic_vectors[i].response, 15) == 0);
+    sys.cic = 6102; memcpy(sys.pif + 0x30, cic_vectors[i].input, 15); sys.pif[63] = 2; pif_control();
+    for (u32 k = 0; k < 15; k++) check(sys.pif[0x30+k] == (u8)~cic_vectors[i].input[k]);
+    sys.pif[63] = 0; pif_control(); check(!sys.pif_challenge);
   }
   // Infinite inputs are not finite overflow, even with overflow enabled.
   for (u32 fmt = 16; fmt <= 17; fmt++) for (u32 fn = 0; fn <= 7; fn++) {

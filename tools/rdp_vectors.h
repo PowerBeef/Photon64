@@ -21,6 +21,15 @@ static const u32 renderer_vectors[][8] = {
   {0x2F100130, 0x00506040}, {0x36010020, 0x0000001C}, {0x29000000, 0},
   {0x2F100130, 0x00507040}, {0x36010020, 0x0000001C}, {0x29000000, 0},
 };
+// Photon64's circular-address contract. The pinned Angrylion model instead
+// rejects addresses above installed RAM until its 24-bit address window wraps.
+// These are GPU/software coherence tests, not independent hardware vectors.
+static const u32 boundary_vectors[][8] = {
+  {0x3F100003, 0x7FFFFC}, {0x3E000000, 0x7FFFF8}, {0x2D000000, 0x00010010},
+  {0x2F300030, 0}, {0x37000000, 0xF80107C1}, {0x36010010, 0}, {0x29000000, 0},
+  {0x2E000000, 0x7FFF0010}, {0x2F000030, 0x64}, {0x3C8FFF1F, 0x88FDF6FB},
+  {0x3A000000, 0x242424FF}, {0x36010010, 0}, {0x29000000, 0},
+};
 // Small formats/IA16 and separate depth: native/reference only.
 static const u32 small_format_vectors[][2] = {
   {0x3F080003, 0x20000}, {0x2D000000, 0x00010008},

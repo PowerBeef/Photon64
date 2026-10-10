@@ -140,7 +140,16 @@ static void cpu_take_irq(void) {
 // ---------------------------------------------------------------------------
 // Memory slow paths
 // ---------------------------------------------------------------------------
+// 32-bit segments: EXL/ERL force kernel; supervisor may use ksseg,
+// user may use only kuseg. Apply before consulting either cached or slow maps.
+static inline int segment_allowed(u32 va) {
+  u32 st = cpu.cp0[C0_STATUS];
+  if ((st & (ST_EXL | ST_ERL)) || !(st & 0x18)) return 1;
+  if (va < 0x80000000u) return 1;
+  return (st & 0x18) == 8 && va >= 0xC0000000u && va < 0xE0000000u;
+}
 static int translate(u32 va, int write, u32 *pa) {
+  if (!segment_allowed(va)) { addr_exception(va, write ? EXC_ADES : EXC_ADEL); return 0; }
   if ((va & 0xC0000000u) == 0x80000000u) { *pa = va & 0x1FFFFFFF; return 1; }
   int r = tlb_lookup(va, write, pa);
   if (r == 1) return 1;
@@ -507,24 +516,33 @@ static void mulu128(u64 a, u64 b, u64 *hi, u64 *lo) {
 #define BRANCHL(cond) do { if (cond) { cpu.npc = cpu.pc + ((u32)SIMM << 2); cpu.branch = 1; } else { cpu.pc += 4; cpu.npc += 4; } } while (0)
 
 #define LOAD(size, expr_fast, T) do { \
-    u32 va = EA; uintptr_t e = map_r[va >> 12]; \
+    u32 va = EA; uintptr_t e = (segment_allowed(va) ? map_r[va >> 12] : 0); \
     if (likely(e && !(va & (size - 1)))) { u8 *p = (u8 *)e; u32 o = va & 0xFFF; (void)p; (void)o; R[RTI] = (T)(expr_fast); } \
     else { u64 v; if (rd_slow(va, size, &v)) R[RTI] = (T)v; } } while (0)
 
 #define STORE(size, stmt_fast) do { \
-    u32 va = EA; uintptr_t e = map_w[va >> 12]; \
+    u32 va = EA; uintptr_t e = (segment_allowed(va) ? map_w[va >> 12] : 0); \
     if (likely(e && !(va & (size - 1)))) { u8 *p = (u8 *)e; u32 o = va & 0xFFF; (void)p; (void)o; stmt_fast; } \
     else wr_slow(va, size, (u64)R[RTI]); } while (0)
 
 static inline int rd64u(u32 va, u64 *v) {   // aligned dword read for LDL/LDR etc.
-  uintptr_t e = map_r[va >> 12];
+  uintptr_t e = (segment_allowed(va) ? map_r[va >> 12] : 0);
   if (likely(e)) { u32 *p = (u32 *)(e + (va & 0xFF8)); *v = ((u64)p[0] << 32) | p[1]; return 1; }
   return rd_slow(va, 8, v);
 }
 static inline int rd32u(u32 va, u32 *v) {
-  uintptr_t e = map_r[va >> 12];
+  uintptr_t e = (segment_allowed(va) ? map_r[va >> 12] : 0);
   if (likely(e)) { *v = *(u32 *)(e + (va & 0xFFC)); return 1; }
   u64 t; if (!rd_slow(va, 4, &t)) return 0; *v = (u32)t; return 1;
+}
+
+static int rd_merge(u32 va, u32 size, u64 *v) {
+  uintptr_t e = segment_allowed(va) ? map_r[va >> 12] : 0;
+  if (e) { u32 *p = (u32 *)(e + (va & (size == 8 ? 0xFF8 : 0xFFC))); *v = size == 8 ? ((u64)p[0] << 32) | p[1] : p[0]; return 1; }
+  u32 pa; if (!translate(va, 0, &pa)) return 0;
+  pa &= ~(size - 1); u64 h = bus_read32(pa);
+  *v = size == 8 ? (h << 32) | bus_read32(pa + 4) : h;
+  return unlikely(cpu_restart) ? restart_insn() : 1;
 }
 
 static NOINLINE void exec_special_slow(u32 op);
@@ -532,7 +550,7 @@ static NOINLINE void exec_special_slow(u32 op);
 void cpu_run(void) {
   while (cpu.cycles < cpu.next_ev) {
     u32 pc = cpu.pc, op;
-    uintptr_t fe = map_r[pc >> 12];
+    uintptr_t fe = segment_allowed(pc) ? map_r[pc >> 12] : 0;
     cpu.ipc = pc;
     cpu.delay = cpu.branch; cpu.branch = 0;
     if (likely(fe && !(pc & 3))) op = *(u32 *)(fe + (pc & 0xFFC));
@@ -636,13 +654,13 @@ void cpu_run(void) {
       case 24: { s64 res; if (__builtin_add_overflow(R[RSI], (s64)SIMM, &res)) cpu_exception(EXC_OV, 0); else R[RTI] = res; break; }       // DADDI
       case 25: R[RTI] = (s64)((u64)R[RSI] + (u64)(s64)SIMM); break;                         // DADDIU
       case 26: {                                                                            // LDL
-        u32 va = EA; u64 m; if (!rd64u(va & ~7u, &m)) break;
+        u32 va = EA; u64 m; if (!rd_merge(va, 8, &m)) break;
         u32 sh = 8 * (va & 7);
         R[RTI] = (s64)((m << sh) | ((u64)R[RTI] & (sh ? (~0ull >> (64 - sh)) : 0)));
         break;
       }
       case 27: {                                                                            // LDR
-        u32 va = EA; u64 m; if (!rd64u(va & ~7u, &m)) break;
+        u32 va = EA; u64 m; if (!rd_merge(va, 8, &m)) break;
         u32 sh = 8 * (7 - (va & 7));
         R[RTI] = (s64)((m >> sh) | ((u64)R[RTI] & (sh ? (~0ull << (64 - sh)) : 0)));
         break;
@@ -650,7 +668,7 @@ void cpu_run(void) {
       case 32: LOAD(1, p[o ^ 3], s8); break;                                                // LB
       case 33: LOAD(2, *(u16 *)(p + (o ^ 2)), s16); break;                                  // LH
       case 34: {                                                                            // LWL
-        u32 va = EA, m; if (!rd32u(va & ~3u, &m)) break;
+        u32 va = EA; u64 wide; if (!rd_merge(va, 4, &wide)) break; u32 m = (u32)wide;
         u32 sh = 8 * (va & 3);
         R[RTI] = (s64)(s32)((m << sh) | ((u32)R[RTI] & (sh ? (0xFFFFFFFFu >> (32 - sh)) : 0)));
         break;
@@ -659,7 +677,7 @@ void cpu_run(void) {
       case 36: LOAD(1, p[o ^ 3], u8); break;                                                // LBU
       case 37: LOAD(2, *(u16 *)(p + (o ^ 2)), u16); break;                                  // LHU
       case 38: {                                                                            // LWR
-        u32 va = EA, m; if (!rd32u(va & ~3u, &m)) break;
+        u32 va = EA; u64 wide; if (!rd_merge(va, 4, &wide)) break; u32 m = (u32)wide;
         u32 sh = 8 * (3 - (va & 3));
         u32 res = (m >> sh) | ((u32)R[RTI] & (sh ? (0xFFFFFFFFu << (32 - sh)) : 0));
         R[RTI] = (s64)(s32)res;
@@ -703,7 +721,7 @@ void cpu_run(void) {
         else { u32 va = EA; u64 v; if (unlikely(va & 7)) { rd_slow(va, 8, &v); break; } if (rd64u(va, &v)) XFER64(RTI)->u = v; }
         break;
       case 55: {                                                                            // LD
-        u32 va = EA; uintptr_t e = map_r[va >> 12];
+        u32 va = EA; uintptr_t e = (segment_allowed(va) ? map_r[va >> 12] : 0);
         if (likely(e && !(va & 7))) { u32 *p = (u32 *)(e + (va & 0xFFF)); R[RTI] = (s64)(((u64)p[0] << 32) | p[1]); }
         else { u64 v; if (rd_slow(va, 8, &v)) R[RTI] = (s64)v; }
         break;
@@ -711,17 +729,17 @@ void cpu_run(void) {
       case 56: if (cpu.llbit) { u32 va = EA; if (wr_slow(va, 4, (u32)R[RTI])) R[RTI] = 1; } else R[RTI] = 0; break;   // SC
       case 57:                                                                              // SWC1
         if (unlikely(!(cpu.cp0[C0_STATUS] & ST_CU1))) cpu_exception(EXC_CPU, 1);
-        else { u32 va = EA; uintptr_t e = map_w[va >> 12]; u32 v = *XFER32(RTI);
+        else { u32 va = EA; uintptr_t e = (segment_allowed(va) ? map_w[va >> 12] : 0); u32 v = *XFER32(RTI);
           if (likely(e && !(va & 3))) *(u32 *)(e + (va & 0xFFF)) = v; else wr_slow(va, 4, v); }
         break;
       case 60: if (cpu.llbit) { u32 va = EA; if (wr_slow(va, 8, (u64)R[RTI])) R[RTI] = 1; } else R[RTI] = 0; break;   // SCD
       case 61:                                                                              // SDC1
         if (unlikely(!(cpu.cp0[C0_STATUS] & ST_CU1))) cpu_exception(EXC_CPU, 1);
-        else { u32 va = EA; uintptr_t e = map_w[va >> 12]; u64 v = XFER64(RTI)->u;
+        else { u32 va = EA; uintptr_t e = (segment_allowed(va) ? map_w[va >> 12] : 0); u64 v = XFER64(RTI)->u;
           if (likely(e && !(va & 7))) { u32 *p = (u32 *)(e + (va & 0xFFF)); p[0] = (u32)(v >> 32); p[1] = (u32)v; } else wr_slow(va, 8, v); }
         break;
       case 63: {                                                                            // SD
-        u32 va = EA; uintptr_t e = map_w[va >> 12]; u64 v = (u64)R[RTI];
+        u32 va = EA; uintptr_t e = (segment_allowed(va) ? map_w[va >> 12] : 0); u64 v = (u64)R[RTI];
         if (likely(e && !(va & 7))) { u32 *p = (u32 *)(e + (va & 0xFFF)); p[0] = (u32)(v >> 32); p[1] = (u32)v; } else wr_slow(va, 8, v);
         break;
       }

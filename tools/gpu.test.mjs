@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-const context = vm.createContext({ console, GPUBufferUsage: { MAP_READ: 1, COPY_DST: 2 }, GPUMapMode: { READ: 1 } });
+const context = vm.createContext({ console, performance, GPUBufferUsage: { MAP_READ: 1, COPY_DST: 2 }, GPUMapMode: { READ: 1 } });
 vm.runInContext(fs.readFileSync(new URL('../src/web/gpu.js', import.meta.url), 'utf8') + '\nthis.N64Gpu = N64Gpu;', context);
 const proto = context.N64Gpu.prototype;
 function gpu(map = async () => {}) {
@@ -22,7 +22,7 @@ test('full sync range includes every chunk tail', () => {
   for (const n of [0, 4, 5, 8, 9]) { const { g, calls } = gpu(); g.syncRange(10, n);
     assert.deepEqual(calls.scan, Array.from({ length: Math.ceil(n / 4) }, (_, i) => [10 + i * 4, Math.min(4, n - i * 4)]));
     assert.deepEqual(calls.uploads, calls.scan.map(([i, c]) => (i + c - 1) * 4)); }
-  const { g, calls } = gpu(); g.syncRange(0x400000 - 2, 10); assert.deepEqual(calls.scan, [[0x400000 - 2, 2]]);
+  const { g, calls } = gpu(); g.syncRange(0x400000 - 2, 10); assert.deepEqual(calls.scan, [[0x400000 - 2, 2], [0, 4], [4, 4]]);
   g.p.syncMax = 0; assert.throws(() => g.syncRange(0, 1), /capacity/);
 });
 test('rejected readback retains regions, destroys staging and never acknowledges', async () => {
@@ -62,4 +62,29 @@ test('feedback snapshot offsets remain aligned for odd halfword counts', async (
     assert.equal(offset % 8, 0); return new ArrayBuffer(size);
   }, unmap() {}, destroy() {} });
   g.touch(1, 1); await g.syncNow();
+});
+
+
+test('negative apron and circular touched ranges include both ends', () => {
+  const { g, calls } = gpu(); g.syncRange(-2, 4); assert.deepEqual(calls.scan, [[0x400000 - 2, 2], [0, 2]]);
+  g.touch(0x400000 - 2, 4); assert.equal(g.touched.get(0), 2); assert.equal(g.touched.get(0x400000 - 2), 2);
+  g.touch(7, 0x400001); assert.equal(g.touched.get(0), 0x400000);
+});
+test('debug readback map failure destroys its staging buffer', async () => {
+  const { g, calls } = gpu(async () => { throw new Error('debug map failed'); });
+  await assert.rejects(g.readBuf({}, 0, 16), /debug map failed/); assert.equal(calls.destroy, 1);
+});
+test('asynchronous validation error blocks acknowledgement and records first cause', async () => {
+  const { g, calls } = gpu(); g.device.pushErrorScope = () => {}; g.device.popErrorScope = async () => ({ message: 'invalid dispatch' });
+  g.touch(0, 4); await assert.rejects(g.syncNow(), /invalid dispatch/); assert.equal(calls.done, 0); assert.equal(g.firstError.phase, 'readback');
+});
+test('partially built scale set is destroyed after pipeline rejection', async () => {
+  const { g } = gpu(); let allocated = 0, destroyed = 0;
+  context.GPUTextureUsage = {}; context.GPUBufferUsage.STORAGE = 4;
+  const resource = () => { allocated++; return { destroy() { destroyed++; }, createView() {} }; };
+  g.hdWords = 0x400000; g.module = async () => ({});
+  g.device.createBuffer = resource; g.device.createTexture = resource;
+  g.device.createRenderPipelineAsync = async () => ({});
+  g.device.createComputePipelineAsync = async d => { if (d.compute.entryPoint === 'ordered_main') throw new Error('pipeline failed'); return {}; };
+  await assert.rejects(g.buildSet(true, 1), /pipeline failed/); assert.equal(allocated, 4); assert.equal(destroyed, 4);
 });

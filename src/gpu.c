@@ -29,15 +29,18 @@ u32 gpu_stale_n, gpu_sync_request, gpu_exact = 1, gpu_hint;
 static struct { u32 a, b; } stale_rng[16];    // byte ranges [a, b) drawn by the GPU since the last copy-back
 
 int gpu_range_stale(u32 pa, u32 len) {
+  if (!len) return 0;
+  pa &= RDRAM_MAX - 1;
+  if (len >= RDRAM_MAX) return gpu_stale_n != 0;
   u32 end = pa + len;
-  for (u32 i = 0; i < gpu_stale_n; i++) if (pa < stale_rng[i].b && end > stale_rng[i].a) return 1;
+  for (u32 i = 0; i < gpu_stale_n; i++) if ((pa < stale_rng[i].b && end > stale_rng[i].a) || (end > RDRAM_MAX && end - RDRAM_MAX > stale_rng[i].a)) return 1;
   return 0;
 }
 u32 gpu_sync_cause[4];
 void gpu_request_sync(void) { gpu_sync_request = 1; cpu.next_ev = 0; }
 
 // The GPU has just been sent primitives that draw into halfwords [idx16, idx16 + count).
-static void gpu_mark_stale(u32 idx16, u32 count) {
+static void gpu_mark_stale_linear(u32 idx16, u32 count) {
   if (!gpu_exact || !count) return;
   u32 a = idx16 << 1, b = a + (count << 1);
   if (a >= RDRAM_MAX) return;
@@ -56,6 +59,17 @@ static void gpu_mark_stale(u32 idx16, u32 count) {
   if (changed) tlb_remap_all();
 }
 
+// Split a circular halfword interval before page bookkeeping. Full spans
+// cover all RDRAM; multiplication takes place only after bounding the count.
+static void gpu_mark_stale(u32 idx16, u32 count) {
+  const u32 words = RDRAM_MAX / 2;
+  if (count >= words) { gpu_mark_stale_linear(0, words); return; }
+  idx16 &= words - 1;
+  u32 tail = (count < words - idx16 ? count : words - idx16);
+  gpu_mark_stale_linear(idx16, tail);
+  if (count > tail) gpu_mark_stale_linear(0, count - tail);
+}
+
 // The host has copied everything back (or GPU and CPU memory were made identical): nothing is stale any more.
 static void gpu_stale_clear(void) {
   int changed = 0;
@@ -65,14 +79,22 @@ static void gpu_stale_clear(void) {
 }
 EXPORT(n64_sync_done) void n64_sync_done(void) { gpu_stale_clear(); gpu_sync_request = 0; }
 
-void gpu_mark_dirty(u32 pa, u32 len) {
+static void gpu_mark_dirty_linear(u32 pa, u32 len) {
   if (!gpu_watch_count || !len) return;
   u32 end = pa + len; if (end > RDRAM_MAX) end = RDRAM_MAX;
   for (u32 k = pa >> 1; k < (end + 1) >> 1; k++) if (gpu_watch[k >> 11]) rdp_hidden[k] |= 0x80;
 }
+void gpu_mark_dirty(u32 pa, u32 len) {
+  if (len >= RDRAM_MAX) { gpu_mark_dirty_linear(0, RDRAM_MAX); return; }
+  pa &= RDRAM_MAX - 1;
+  u32 tail = len < RDRAM_MAX - pa ? len : RDRAM_MAX - pa;
+  gpu_mark_dirty_linear(pa, tail);
+  if (len > tail) gpu_mark_dirty_linear(0, len - tail);
+}
 
 // The GPU is about to render into halfwords [idx16, idx16 + count): from now on CPU writes there must be tracked.
-static void gpu_watch_region(u32 idx16, u32 count) {
+static void gpu_watch_linear(u32 idx16, u32 count) {
+  if (!count) return;
   u32 a = idx16 >> 11, b = (idx16 + count + 2047) >> 11, added = 0;
   if (b > (RDRAM_MAX >> 12)) b = RDRAM_MAX >> 12;
   for (u32 pg = a; pg < b; pg++) {
@@ -80,6 +102,15 @@ static void gpu_watch_region(u32 idx16, u32 count) {
     if (!gpu_watch[pg]) { gpu_watch[pg] = 1; gpu_watch_count++; cpu_watch_page(pg, 1); added = 1; }
   }
   if (added) tlb_remap_all();
+}
+
+static void gpu_watch_region(u32 idx16, u32 count) {
+  const u32 words = RDRAM_MAX / 2;
+  if (count >= words) { gpu_watch_linear(0, words); return; }
+  idx16 &= words - 1;
+  u32 tail = (count < words - idx16 ? count : words - idx16);
+  gpu_watch_linear(idx16, tail);
+  if (count > tail) gpu_watch_linear(0, count - tail);
 }
 
 // Pages nobody has rendered to for a while go back to fast stores (all = leave GPU mode).

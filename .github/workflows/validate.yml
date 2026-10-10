@@ -7,12 +7,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
           cache: npm
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - run: tools/setup.sh
@@ -20,7 +20,7 @@ jobs:
       - name: Record legacy mixed-stage screenshot diagnostic
         continue-on-error: true
         run: set -o pipefail; .venv/bin/python tools/cmp_ref.py testroms 120 | tee out/legacy-reference-diagnostic.log
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: validation-evidence
@@ -29,7 +29,10 @@ jobs:
             out/legacy-reference-diagnostic.log
             out/photon64.html
             out/n64.wasm
+            out/rdp-vectors.json
+            out/build-info.json
   browser:
+    name: browser-${{ matrix.engine }}-${{ matrix.channel || 'default' }}-mobile-${{ matrix.mobile }}
     needs: baseline
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -44,13 +47,13 @@ jobs:
           - { os: macos-15, engine: webkit, channel: '', mobile: '0' }
           - { os: macos-15, engine: webkit, channel: '', mobile: '1' }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
           cache: npm
       - run: npm ci
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: validation-evidence
           path: out
@@ -67,36 +70,82 @@ jobs:
         env:
           BROWSER_ENGINE: ${{ matrix.engine }}
           BROWSER_CHANNEL: ${{ matrix.channel }}
+      - name: Check standalone file launch
+        run: node tools/filecheck.mjs
+        env:
+          BROWSER_ENGINE: ${{ matrix.engine }}
+          BROWSER_CHANNEL: ${{ matrix.channel }}
       - name: Benchmark repeatable software execution
         if: matrix.engine == 'chromium' && matrix.channel == '' && matrix.mobile == '0'
         run: node tools/benchmark.mjs testroms/RSPCP2VRCP.N64 --frames 240 --warmup 120 --repeats 2 --output out/benchmark-fixture
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: browser-${{ matrix.engine }}-${{ matrix.channel || 'default' }}-mobile-${{ matrix.mobile }}
           path: |
             out/browser-evidence/
             out/ui-evidence/
+            out/file-evidence/
             out/benchmark-fixture/
   safari:
     needs: baseline
     runs-on: macos-15
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: validation-evidence
           path: out
       - name: Enable WebDriver on the disposable hosted runner
         run: sudo /usr/bin/safaridriver --enable
+      - name: Diagnose desktop Safari independently
+        run: node tools/safaricheck.mjs testroms/RSPCP2VRCP.N64
+        env:
+          SAFARI_CASES: desktop
+          UI_EVIDENCE: out/safari-evidence/desktop-alone
       - name: Check branded Safari menus and persistence
         run: node tools/safaricheck.mjs testroms/RSPCP2VRCP.N64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: native-safari-evidence
           path: out/safari-evidence/
+
+  gpu:
+    needs: baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: validation-evidence
+          path: out
+      - name: Provision the known software Vulkan adapter
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+      - name: Require native and full-storage HD-at-1x command vectors
+        run: |
+          set -euo pipefail
+          mkdir -p out/gpu-evidence
+          export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          if [ ! -f "$VK_ICD_FILENAMES" ]; then export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json; fi
+          test -f "$VK_ICD_FILENAMES"
+          export VK_DRIVER_FILES="$VK_ICD_FILENAMES"
+          node tools/dawntest.mjs testroms/RSPCP2VRCP.N64 1 '' --fn tools/rdp_gpu_vectors.js | tee out/gpu-evidence/native.json
+          node tools/dawntest.mjs testroms/RSPCP2VRCP.N64 1 '' --fn tools/rdp_gpu_vectors.js --hd 0 | tee out/gpu-evidence/hd1.json
+          node tools/device_loss.mjs | tee out/gpu-evidence/device-loss.json
+          node tools/gpu_lifecycle.mjs | tee out/gpu-evidence/lifecycle.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: gpu-evidence
+          path: out/gpu-evidence/

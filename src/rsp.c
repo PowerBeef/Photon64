@@ -37,7 +37,7 @@ RSP rsp __attribute__((aligned(32)));
 static inline u8 dm_r8(u32 a) { return DMEM[(a & 0xFFF) ^ 3]; }
 static inline void dm_w8(u32 a, u8 v) { DMEM[(a & 0xFFF) ^ 3] = v; }
 static inline u32 dm_r16(u32 a) { a &= 0xFFF; if (!(a & 1)) return *(u16 *)(DMEM + (a ^ 2)); return (dm_r8(a) << 8) | dm_r8(a + 1); }
-static inline u32 dm_r32(u32 a) { a &= 0xFFF; if (!(a & 3)) return *(u32 *)(DMEM + a); return (dm_r8(a) << 24) | (dm_r8(a + 1) << 16) | (dm_r8(a + 2) << 8) | dm_r8(a + 3); }
+static inline u32 dm_r32(u32 a) { a &= 0xFFF; if (!(a & 3)) return *(u32 *)(DMEM + a); return ((u32)dm_r8(a) << 24) | (dm_r8(a + 1) << 16) | (dm_r8(a + 2) << 8) | dm_r8(a + 3); }
 static inline void dm_w16(u32 a, u32 v) { a &= 0xFFF; if (!(a & 1)) *(u16 *)(DMEM + (a ^ 2)) = v; else { dm_w8(a, v >> 8); dm_w8(a + 1, v); } }
 static inline void dm_w32(u32 a, u32 v) { a &= 0xFFF; if (!(a & 3)) *(u32 *)(DMEM + a) = v; else { dm_w8(a, v >> 24); dm_w8(a + 1, v >> 16); dm_w8(a + 2, v >> 8); dm_w8(a + 3, v); } }
 

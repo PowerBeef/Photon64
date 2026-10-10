@@ -8,7 +8,7 @@ window.runCustom = async cfg => {
   const gpu = await N64Gpu.create(core, null, sh); if (!gpu) throw new Error('no adapter'); gpu.device.pushErrorScope('validation'); gpu.reset();
   if (cfg.hd === 0) await gpu.setScale(0, true);
   const batches = await (await fetch('/out/rdp-vectors.json')).json();
-  if (!Array.isArray(batches) || batches.length !== 12) throw new Error('missing synthetic batches (expected twelve)');
+  if (!Array.isArray(batches) || batches.length !== 14) throw new Error('missing synthetic batches (expected fourteen)');
   let checks = 0;
   for (const b of batches) {
     const mem = core.ex.memory.buffer;
@@ -18,8 +18,18 @@ window.runCustom = async cfg => {
     gpu.flush(); await gpu.device.queue.onSubmittedWorkDone();
     const set = cfg.hd === 0 ? gpu.hd : gpu.native;
     const idx = b.info[3] * (b.info[0] === 4 ? 2 : 1);
-    const actual = await gpu.readBuf(set.target, idx * 4, b.expected.length * 4);
+    const readCircular = async (index, n) => {
+      index &= 0x3FFFFF; const tail = Math.min(n, 0x400000 - index), out = new Uint32Array(n);
+      out.set(await gpu.readBuf(set.target, index * 4, tail * 4));
+      if (n > tail) out.set(await gpu.readBuf(set.target, 0, (n - tail) * 4), tail);
+      return out;
+    };
+    const actual = await readCircular(idx, b.expected.length);
     for (let i = 0; i < actual.length; i++) { if ((actual[i] & 0x3FFFF) !== b.expected[i]) throw new Error(`batch ${checks}: framebuffer ${i} ${actual[i]} != ${b.expected[i]}`); }
+    if (b.info[15] & 2) {
+      const depth = await readCircular(b.info[4], b.depth.length);
+      for (let i = 0; i < depth.length; i++) if ((depth[i] & 0x3FFFF) !== b.depth[i]) throw new Error(`batch ${checks}: depth ${i} ${depth[i]} != ${b.depth[i]}`);
+    }
     const state = await gpu.readBuf(set.feedbackBuf, 0, 48);
     for (let i = 0; i < 12; i++) if ((state[i] | 0) !== b.feedback[i]) throw new Error(`batch ${checks}: feedback ${i} ${state[i] | 0} != ${b.feedback[i]}`);
     checks++;

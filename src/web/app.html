@@ -76,9 +76,11 @@ svg { display: block; }
 .cart .nm { font: 700 13.5px/1.25 var(--round); margin: 8px 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cart .sub { font-size: 11.5px; color: rgba(255, 255, 255, .62); margin: 1px 2px 0; }
 .cart .grip { height: 9px; margin: 8px 14px 0; border-radius: 3px 3px 0 0; background: repeating-linear-gradient(90deg, #24272e 0 5px, transparent 5px 9px); opacity: .9; }
-.cart .rm { position: absolute; right: 13px; top: 13px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: rgba(14, 15, 19, .72); color: #fff; opacity: 0; transition: opacity .15s; }
+.cart-play { position: absolute; inset: 0; background: transparent; border-radius: inherit; z-index: 1; }
+.cart .rm { z-index: 2; position: absolute; right: 13px; top: 13px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: rgba(14, 15, 19, .72); color: #fff; opacity: 0; transition: opacity .15s; }
 .cart .rm svg { width: 16px; height: 16px; }
-.cart:hover .rm, .cart .rm:focus-visible, body.touchdev .cart .rm { opacity: 1; }
+.cart:hover .rm, .cart .rm:focus-visible, body.touchdev .cart-play { position: absolute; inset: 0; background: transparent; border-radius: inherit; z-index: 1; }
+.cart .rm { z-index: 2; opacity: 1; }
 .cart .rm.sure { background: var(--red); width: auto; padding: 0 10px; font: 700 12px var(--round); opacity: 1; }
 .cart.add { background: none; box-shadow: none; border: 1.5px dashed #4a505c; border-radius: 14px; padding: 0; display: grid; place-items: center; min-height: 150px; color: var(--dim); font: 700 14px var(--round); }
 .cart.add:hover { border-color: var(--blue); color: var(--text); }
@@ -333,14 +335,21 @@ h3 { font: 700 12px var(--round); text-transform: uppercase; letter-spacing: .08
           <h3>Keyboard</h3>
           <div id="binds"></div>
           <div class="btnrow"><button class="pbtn quiet" id="s-keys-reset">Reset keys</button></div>
-          <p class="about">A standard gamepad works too, rumble included. F2 saves and F4 loads the first state slot; Esc opens the menu.</p>
+          <p class="about">Up to four standard gamepads work, rumble included. Connection order assigns controller ports; reconnecting preserves a port. Keyboard and touch use port 1. F2 saves and F4 loads the first state slot; Esc opens the menu.</p>
         </div>
         <div data-pane="data" hidden>
           <div class="row"><label for="s-keep">Keep games in the library<small>Stores each game you open in this browser so it can be started from the home screen.</small></label><input type="checkbox" id="s-keep"></div>
           <h3>Game save</h3>
+          <div class="row"><label for="s-media">Save hardware<small>Change only for a game with incorrect detection. Creates a backup before resetting.</small></label><select id="s-media"><option value="-1">Auto</option><option value="0">None / autodetect</option><option value="1">4K EEPROM</option><option value="2">16K EEPROM</option><option value="3">SRAM</option><option value="4">Flash</option></select></div>
           <div class="btnrow"><button class="pbtn quiet" id="s-export">Export save</button><button class="pbtn quiet" id="s-import">Import save</button></div>
           <p class="about">Battery saves, Controller Pak data and save states are kept in this browser. Export a save to back it up or move it to another device.</p>
           <input id="savefile" type="file" hidden>
+          <div class="btnrow"><button class="pbtn quiet" id="s-backup">Export previous save</button><button class="pbtn quiet" id="s-recover">Restore previous save</button></div>
+          <p class="about">Changing save hardware keeps one previous backup. Restoring it swaps the two copies.</p>
+          <div class="btnrow"><button class="pbtn quiet" id="s-state-export">Export state</button><button class="pbtn quiet" id="s-state-import">Import state</button></div>
+          <p class="about">State files require the exact cartridge and the same Photon64 core build. Battery saves are the portable choice across upgrades.</p>
+          <input id="statefile" type="file" accept=".p64state" hidden>
+          <div class="btnrow"><button class="pbtn quiet" id="s-storage">Storage usage</button><button class="pbtn quiet" id="s-diagnostics">Export diagnostics</button></div>
           <h3>Settings</h3>
           <div class="btnrow"><button class="pbtn quiet" id="s-defaults">Restore default settings</button></div>
           <p class="about">Puts every setting and key back to how it started. Your library, saves and save states are kept.</p>
