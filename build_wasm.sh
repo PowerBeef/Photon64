@@ -15,9 +15,13 @@ case $($CC --target=wasm32 -print-prog-name=wasm-ld 2>/dev/null) in
   *) echo "error: $CC cannot link wasm32 (missing wasm-ld; need: brew install llvm lld)" >&2; exit 1 ;;
 esac
 mkdir -p out
+# Preserve function names for V8 CPU profiles without changing optimized code.
+strip=--strip-all
+[ "${WASM_SYMBOLS:-0}" = 1 ] && strip=--strip-debug
+output=${WASM_OUTPUT:-out/n64.wasm}
 $CC --target=wasm32 -O3 -msimd128 -mbulk-memory -mnontrapping-fptoint -msign-ext -mmutable-globals \
   -ffp-contract=off -fno-math-errno -fvisibility=hidden -nostdlib -ffreestanding \
   -Wall -Wno-unused-function -Wno-unused-variable \
-  -Wl,--no-entry -Wl,--export=__heap_base -Wl,-z,stack-size=1048576 -Wl,--strip-all -Wl,--lto-O3 -flto \
-  -o out/n64.wasm src/n64.c
-ls -la out/n64.wasm
+  -Wl,--no-entry -Wl,--export=__heap_base -Wl,-z,stack-size=1048576 -Wl,$strip -Wl,--lto-O3 -flto \
+  -o "$output" src/n64.c
+ls -la "$output"

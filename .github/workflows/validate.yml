@@ -29,6 +29,10 @@ jobs:
   browser:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        mobile: ['0', '1']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,8 +48,15 @@ jobs:
         run: . out/env.sh && npm run build
       - name: Check browser persistence and lifecycle with a shipped fixture
         run: node tools/browsercheck.mjs testroms/RSPCP2VRCP.N64
+        env:
+          BROWSER_MOBILE: ${{ matrix.mobile }}
+      - name: Benchmark repeatable software execution
+        if: matrix.mobile == '0'
+        run: node tools/benchmark.mjs testroms/RSPCP2VRCP.N64 --frames 240 --warmup 120 --repeats 2 --output out/benchmark-fixture
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: browser-evidence
-          path: out/browsercheck.png
+          name: browser-evidence-mobile-${{ matrix.mobile }}
+          path: |
+            out/browser-evidence/
+            out/benchmark-fixture/

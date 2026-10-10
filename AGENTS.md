@@ -54,6 +54,8 @@ node tools/rdp_gpu_probe.mjs "roms/Mario Kart 64 (USA).z64"
 
 `browsercheck.mjs` checks duplicate state saves, state restoration, IndexedDB battery persistence across reload, cached cartridge loading and page errors. Its independent CI job uses a shipped fixture; never upload commercial cartridges for CI.
 
+The browser lane also checks keyboard/menu pause/resume and records traces, CPU profiles, logs and screenshots for desktop and emulated mobile viewports. Those traces may contain ROM bytes; keep commercial traces local. Use `tools/benchmark.mjs` for sequential fresh-process core+VI timings after recorded-input warmup, with final-state/image/audio agreement. `WASM_SYMBOLS=1 WASM_OUTPUT=out/n64-symbols.wasm ./build_wasm.sh` preserves function names for separate `--profile` replays. Shared-host field timing is not physical-device FPS.
+
 Chromium harnesses must run outside the agent's command sandbox, where prior runs segfaulted. Use an approved outside-sandbox command, the user's terminal, or GitHub Actions. When the host disables escalation, do not repeatedly request it or change host security configuration. Document the unexecuted lane and use an authorized independent runner. GitHub access does not change local execution policy.
 
 Use installed Playwright Chromium or `CHROME_EXECUTABLE`. Dawn uses the local npm `webgpu` bindings. On Linux, install an OS Vulkan driver or set `VK_ICD_FILENAMES` to an existing ICD; lavapipe is a software adapter. This workspace has generated `.tools/lvp_icd.json`, which is not portable. On macOS select `GPU_BACKEND=metal`. Name the tested adapter and distinguish shader/coherence evidence from physical performance and device-loss testing.

@@ -5,6 +5,7 @@
   "scripts": {
     "test": "node tools/jscheck.mjs && node --test tools/*.test.mjs",
     "build": "./build_wasm.sh && node tools/build.mjs",
+    "bench": "node tools/benchmark.mjs",
     "validate": "tools/validate.sh",
     "test:roms": "node tools/romcheck.mjs roms --frames 300 --output out/commercial.json"
   },

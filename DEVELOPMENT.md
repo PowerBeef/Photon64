@@ -50,4 +50,55 @@ Chrome for Testing was installed manually under `.tools/chrome/chrome-linux64` a
 CHROME_EXECUTABLE="$PWD/.tools/chrome/chrome-linux64/chrome" node tools/browsercheck.mjs "roms/Super Mario 64 (USA).z64"
 ```
 
-`browsercheck.mjs` checks actual IndexedDB persistence across reload, cached ROM loading, duplicate state writes and state restoration. Local execution remains blocked: `AGENTS.md` requires outside-sandbox execution and this environment rejected escalation. Installing Chromium does not remove that policy limitation. After publication, the independent browser job passed with the shipped RSP fixture in [Actions run 38016280375](https://github.com/PowerBeef/Photon64/actions/runs/38016280375). That hosted result does not establish local-browser, physical-GPU or commercial-game coverage. See `VALIDATION_REPORT.md` for the exact tested revision and the separate reference-image failure.
+`browsercheck.mjs` checks actual IndexedDB persistence across reload, cached ROM loading, duplicate state writes, state restoration, keyboard pause/resume and menu resume. It records a 120-field paced sample, a CPU profile, console/page errors, screenshots and a Playwright trace under `out/browser-evidence/`, including evidence on failure. `BROWSER_MOBILE=1` selects a mobile viewport/touch context; this is Chromium emulation, not an iPhone or Android device. `BROWSER_EVIDENCE` changes the artifact directory. Traces can contain loaded cartridge data: keep commercial-game evidence local.
+
+Local execution remains blocked: `AGENTS.md` requires outside-sandbox execution and this environment rejected escalation. Installing Chromium or Playwright MCP does not remove that limitation. The managed cloud browser is in a separate network namespace (workspace localhost is unreachable), and its policy rejects `file:` URLs. Do not tunnel or change host policy to work around those boundaries. The independent browser job passed its original shipped-fixture checks in [Actions run 38016280375](https://github.com/PowerBeef/Photon64/actions/runs/38016280375); expanded checks have separate run evidence. That hosted result does not establish local-browser, physical-GPU or commercial-game coverage.
+
+## Gameplay benchmarks and debugging
+
+`node tools/coreplay.mjs ROM [output-directory]` opens a persistent software-core session controlled by JSON lines on stdin. This gives an agent direct field stepping, controller input, machine inspection and PNG snapshots without a browser. `step` holds buttons/axes for a field count, `replay` uses the existing absolute-field input script, and `snapshot` captures the last VI image without advancing the machine. For example:
+
+```json
+{"op":"replay","fields":4200,"inputs":"tools/inputs/sm64.txt"}
+{"op":"snapshot"}
+{"op":"step","fields":120,"input":"A+X=80"}
+{"op":"snapshot"}
+{"op":"inspect"}
+{"op":"quit"}
+```
+
+The live session excludes the frontend, browser audio and GPU. Use it to investigate gameplay visually and choose the next inputs; use the independent browser runner for frontend behavior. Core sessions and image captures remain local.
+
+Run sequential fresh-process replays, measuring a selected field range after boot/menu navigation. This includes software CPU/RSP/RDP execution **and VI rendering**, unlike the older core-only timing utility. Each repeat must complete, produce valid VI fields and agree in final counters and RDRAM/audio/image hashes. Samples and mean/p50/p95/p99/max times, peak process RSS, host/runtime identities and content hashes are written to `summary.json` and per-run files. A worker timeout fails rather than hanging indefinitely. These are shared-host measurements per emulated field, not rendered-game FPS or a prediction of phone performance.
+
+```sh
+npm run bench -- "roms/Super Mario 64 (USA).z64" \
+  --frames 4200 --warmup 3800 --inputs tools/inputs/sm64.txt \
+  --repeats 3 --output out/playtest-sm64
+```
+
+Use `--frames 3300 --warmup 2800 --inputs tools/inputs/mk64.txt` for Mario Kart, `4600/4000/ge.txt` for GoldenEye, and `6500/5700/pd.txt` for Perfect Dark. These scripts replay a bounded scenario; they do not establish whole-game compatibility. Missing scripts for Smash and World Driver remain a coverage gap.
+
+For named V8 profiles, preserve WASM function names in a separate optimized build, then use `--profile`. The profiled replay is separate from benchmark repeats and must produce the same final hashes. Its profile covers the entire process including boot and warmup; timing statistics exclude warmup. Open `replay.cpuprofile` in a CPU-profile viewer.
+
+```sh
+. out/env.sh
+WASM_SYMBOLS=1 WASM_OUTPUT=out/n64-symbols.wasm ./build_wasm.sh
+npm run bench -- "roms/Super Mario 64 (USA).z64" \
+  --frames 4200 --warmup 3800 --inputs tools/inputs/sm64.txt \
+  --wasm out/n64-symbols.wasm --profile --output out/playtest-sm64
+```
+
+For visual/audio inspection, the native harness already accepts the same input scripts. The image sequence can be converted to a video with FFmpeg. Native WAV output uses the last reported sample rate for the stream, so games that change DAC rates require segmented audio analysis before drawing quality conclusions.
+
+```sh
+mkdir -p out/capture-sm64
+out/native "roms/Super Mario 64 (USA).z64" 4200 \
+  -i "$(cat tools/inputs/sm64.txt)" -o out/capture-sm64/frame- -e 60 \
+  -wav out/capture-sm64/audio.wav
+VK_ICD_FILENAMES="$PWD/.tools/lvp_icd.json" node tools/dawntest.mjs \
+  "roms/Mario Kart 64 (USA).z64" 3300 "2800,3299" \
+  "$(cat tools/inputs/mk64.txt)" --trace 10 --images out/mk64-gpu
+```
+
+Use the sanitizer baseline for CPU/memory failures, `n64_debug_state()` and exact replay counters for machine-state diagnosis, Dawn's `--trace` for GPU copy-back ordering, and the independent oracle for renderer accuracy. Do not infer audio-device latency, physical controller behavior, WebGPU device performance or complete game compatibility from these lanes. See `VALIDATION_REPORT.md` for executed evidence and unresolved failures.
