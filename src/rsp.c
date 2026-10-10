@@ -240,7 +240,8 @@ static inline v16 clamp_s16(v32 x) {
 #else
   const v32 lo = { -32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768 };
   const v32 hi = { 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767 };
-  return NARROW(__builtin_elementwise_min(__builtin_elementwise_max(x, lo), hi));
+  v32 under = x < lo, over = x > hi;
+  return NARROW((x & ~(under | over)) | (lo & under) | (hi & over));
 #endif
 }
 // unsigned-style saturation of the low slice (VMADL/VMADN)

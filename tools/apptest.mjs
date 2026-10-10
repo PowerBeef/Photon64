@@ -11,7 +11,7 @@ const html = flag('--html') || 'out/photon64.html';
 const [rom, prefix] = args;
 const gpuArgs = nogpu ? [] : ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-vulkan=swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist',
   '--disable-vulkan-surface', '--enable-unsafe-swiftshader', '--disable-gpu-watchdog'];
-const browser = await chromium.launch({ args: [...gpuArgs, '--autoplay-policy=no-user-gesture-required'] });
+const browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, args: [...gpuArgs, '--autoplay-policy=no-user-gesture-required'] });
 const ctx = await browser.newContext(mobile ? { viewport: portrait ? { width: 390, height: 844 } : { width: 844, height: 390 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true }
   : { viewport: { width: 1280, height: 800 } });
 const page = await ctx.newPage();

@@ -1,16 +1,25 @@
 {
   "name": "photon64",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Experimental Nintendo 64 emulator for the browser",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node tools/jscheck.mjs && node --test tools/*.test.mjs",
+    "build": "./build_wasm.sh && node tools/build.mjs",
+    "validate": "tools/validate.sh",
+    "test:roms": "node tools/romcheck.mjs roms --frames 300 --output out/commercial.json"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
-    "playwright": "^1.63.0"
+    "playwright": "1.63.0"
+  },
+  "devDependencies": {
+    "webgpu": "0.6.2"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=24"
   }
 }

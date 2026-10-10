@@ -1,3 +1,4 @@
+import { verdict } from './results.mjs';
 // Same tests as gputest.mjs, but on Dawn's node bindings (no browser): much faster shader compiles, and it can run
 // on Mesa lavapipe (GPU_BACKEND=lvp, default) or whatever Vulkan driver is installed.
 //   node tools/dawntest.mjs rom frames "check,frames" [inputs] [--images prefix] [--hd L] [--window n] [--list file] [--stripped]
@@ -6,7 +7,7 @@ if ((process.env.GPU_BACKEND || 'lvp') === 'lvp' && !process.env.VK_ICD_FILENAME
   if (process.platform !== 'linux') { console.error('error: dawntest defaults to GPU_BACKEND=lvp (Linux lavapipe); on this host set GPU_BACKEND/VK_ICD_FILENAMES explicitly or use gputest.mjs'); process.exit(1); }
   process.env.VK_ICD_FILENAMES = process.env.VK_DRIVER_FILES = process.env.LVP_ICD || '/usr/share/vulkan/icd.d/lvp_icd.json';
 }
-const dawnBindings = process.env.DAWN_WEBGPU || '/home/claude/dawn/node_modules/webgpu/index.js';
+const dawnBindings = process.env.DAWN_WEBGPU || fileURLToPath(new URL('../node_modules/webgpu/index.js', import.meta.url));
 if (!fs.existsSync(dawnBindings)) { console.error(`error: Dawn bindings not found at ${dawnBindings} (set DAWN_WEBGPU=... or use gputest.mjs)`); process.exit(1); }
 const { create, globals } = await import(dawnBindings);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -48,7 +49,7 @@ if (listFile) {
     if (x.error || x.vi || (x.fb && x.fb.length) || !x.sync) bad++;
   }
   console.log(`ROMs: ${r.results.length}, with differences: ${bad}`, JSON.stringify(r.stats));
-  process.exit(0);
+  process.exit(bad || !r.results.length ? 1 : 0);
 }
 let res;
 if (process.env.XPAK) ctx.window.XPAK_MODE = +process.env.XPAK;     // XPAK=2: run the game without the Expansion Pak
@@ -58,5 +59,8 @@ if (res.images) for (const im of res.images) {
   fs.writeFileSync(`${images}_${String(im.frame).padStart(5, '0')}.png`, png(im.w, im.h, d));
 }
 delete res.images;
+res.coverage = { machineState: ['pc', 'rspInstructionCount', 'primitiveCount'], framebuffer: 'last batch target only', renderedCheckpoints: res.checks?.filter(c => c.prims > 0).length || 0 };
+res.expectedChecks = cfg.checks;
+res.verdict = verdict(res, cfg.checks, noref || noexact);
 console.log(JSON.stringify(res, null, 1));
-process.exit(0);
+process.exit(res.verdict.outcome === 'PASS' ? 0 : res.verdict.outcome === 'SKIP' ? 2 : 1);

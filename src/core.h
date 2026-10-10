@@ -103,7 +103,7 @@ typedef struct {
   u32 cic, tv;             // tv: 0 PAL, 1 NTSC, 2 MPAL
   u32 rdram_size;
   u32 save_type;           // 0 none/auto, 1 eep4k, 2 eep16k, 3 sram, 4 flash
-  u32 save_dirty;
+  u32 save_dirty;          // nonzero write generation; host clears only a committed matching snapshot
   // flash
   u32 fl_mode; u64 fl_status; u32 fl_erase_off; u32 fl_write_off;
   // input

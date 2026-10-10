@@ -7,3 +7,7 @@ out/
 photon64.html
 # macOS
 .DS_Store
+
+# local pinned SDK / development environment
+.tools/
+__pycache__/

@@ -204,6 +204,9 @@ class N64Gpu {
 
   // (re)start GPU rendering: GPU memory becomes an exact copy of emulated RDRAM (data + hidden bits)
   reset() {
+    this.generation = (this.generation || 0) + 1;
+    for (const j of this.inflight) j.dead = true;
+    this.readbackError = null; this.tail = Promise.resolve();
     this.ex.n64_config(0, 1); this.ex.n64_config(8, this.exact ? 1 : 0); this.ex.n64_config(7, this.hd ? 1 : 0);   // (a loaded save state may carry other settings)
     this.ex.n64_sync_done();
     const n = this.p.syncMax, q = this.device.queue;
@@ -218,8 +221,15 @@ class N64Gpu {
   // push CPU-side changes of halfwords [idx, idx + count) to the GPU
   syncRange(idx, count) {
     if (idx < 0) { count += idx; idx = 0; }
-    count = Math.min(count, this.p.syncMax, FB_WORDS - idx);
+    count = Math.min(count, FB_WORDS - idx);
     if (count <= 0) return;
+    if (!Number.isInteger(this.p.syncMax) || this.p.syncMax <= 0) throw new Error('Invalid sync capacity');
+    while (count > 0) {
+      const n = Math.min(count, this.p.syncMax);
+      this.syncChunk(idx, n); idx += n; count -= n;
+    }
+  }
+  syncChunk(idx, count) {
     if (!this.ex.n64_sync_scan(idx, count)) return;
     const q = this.device.queue, buf = this.mem.buffer, u32 = new Uint32Array(buf);
     const nruns = u32[this.p.nruns >> 2];
@@ -282,6 +292,7 @@ class N64Gpu {
 
   // asynchronous GPU -> CPU copy of what has been rendered since the last one (as much as fits in one go)
   startReadback() {
+    if (this.readbackError) throw this.readbackError;
     if (!this.touched.size) return;
     const regs = []; let total = 0;
     for (const [idx, cnt0] of this.touched) {
@@ -295,16 +306,27 @@ class N64Gpu {
     const bytes = total * 4;
     let sb = null;
     for (let i = 0; i < this.pool.length; i++) if (this.pool[i].size >= bytes) { sb = this.pool.splice(i, 1)[0]; break; }
-    if (!sb) sb = this.device.createBuffer({ size: Math.max(1 << 20, 1 << Math.ceil(Math.log2(bytes))), usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
-    const enc = this.device.createCommandEncoder();
-    for (const r of regs) enc.copyBufferToBuffer(this.fbBuf, r.idx * 4, sb, r.off * 4, r.cnt * 4);
-    this.device.queue.submit([enc.finish()]);
+    try {
+      if (!sb) sb = this.device.createBuffer({ size: Math.max(1 << 20, 1 << Math.ceil(Math.log2(bytes))), usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+      const enc = this.device.createCommandEncoder();
+      for (const r of regs) enc.copyBufferToBuffer(this.fbBuf, r.idx * 4, sb, r.off * 4, r.cnt * 4);
+      this.device.queue.submit([enc.finish()]);
+    } catch (error) {
+      if (sb) sb.destroy();
+      for (const r of regs) this.touch(r.idx, r.cnt);
+      this.readbackError = error; throw error;
+    }
     const job = { regs, excl: [], dead: false };
     this.inflight.push(job);
     // (results are applied strictly in the order the snapshots were taken, whatever order the maps complete in)
     const prev = this.tail || Promise.resolve();
-    job.promise = Promise.all([sb.mapAsync(GPUMapMode.READ, 0, bytes), prev]).then(() => {
-      this.inflight.splice(this.inflight.indexOf(job), 1);
+    let mapped, reusable = false;
+    try { mapped = sb.mapAsync(GPUMapMode.READ, 0, bytes); } catch (e) { mapped = Promise.reject(e); }
+    job.promise = Promise.allSettled([mapped, prev]).then(results => {
+      // Wait for both promises before touching or releasing a staging buffer.
+      if (job.dead) return;
+      const rejected = results.find(r => r.status === 'rejected');
+      if (rejected) throw rejected.reason;
       if (!job.dead) {
         new Uint32Array(this.mem.buffer, this.scratch, total).set(new Uint32Array(sb.getMappedRange(0, bytes)));
         for (const r of regs) {
@@ -322,12 +344,22 @@ class N64Gpu {
           }
           for (const [s, e] of segs) this.ex.n64_readback_apply(s, e - s, this.scratch + (r.off + s - r.idx) * 4);
         }
-        this.stats.readbacks++;
+        this.stats.readbacks++; reusable = true;
       }
+    }).catch(error => {
+      if (!job.dead) {
+        for (const r of regs) this.touch(r.idx, r.cnt);
+        this.readbackError = error;
+        throw error;
+      }
+    }).finally(() => {
+      const i = this.inflight.indexOf(job); if (i >= 0) this.inflight.splice(i, 1);
       sb.unmap();
-      if (this.pool.length < 4) this.pool.push(sb); else sb.destroy();
-    }, () => { const i = this.inflight.indexOf(job); if (i >= 0) this.inflight.splice(i, 1); });
+      if (reusable && !job.dead && !this.readbackError && this.pool.length < 4) this.pool.push(sb); else sb.destroy();
+    });
     this.tail = job.promise;
+    // Speculative jobs have no awaiting caller yet; syncNow observes the latch.
+    job.promise.catch(() => {});
   }
 
   // run the VI for the field that just ended and (optionally) present it
@@ -382,13 +414,17 @@ class N64Gpu {
   // Bring emulated RDRAM fully up to date with the GPU: called when the core stops because the game is about to
   // look at something the GPU drew (n64_frame() returned 1), before save states and when leaving GPU mode.
   async syncNow() {
+    const generation = this.generation;
+    if (this.readbackError) throw this.readbackError;
     // waits: the copy-back was not there yet; late: it had not even been started (the guess at picture completion missed)
     if (this.touched.size || this.inflight.length) this.stats.waits++;
     if (this.touched.size) this.stats.late++;
     while (this.touched.size || this.inflight.length) {
       this.startReadback();
       await Promise.all(this.inflight.map(j => j.promise));
+      if (generation !== this.generation) throw new Error('Obsolete renderer barrier');
     }
+    if (this.readbackError) throw this.readbackError;
     this.ex.n64_sync_done();
     this.stats.syncs++;
     this.speculate = 600;

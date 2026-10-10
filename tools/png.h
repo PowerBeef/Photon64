@@ -15,6 +15,7 @@ static void png_chunk(FILE *f, const char *type, const uint8_t *d, uint32_t n) {
   uint8_t t[4] = { c >> 24, c >> 16, c >> 8, c }; fwrite(t, 1, 4, f);
 }
 static int png_write(const char *path, const uint8_t *rgba, int w, int h) {
+  if (w <= 0 || h <= 0) return 0;
   FILE *f = fopen(path, "wb"); if (!f) return 0;
   fwrite("\x89PNG\r\n\x1a\n", 1, 8, f);
   uint8_t ihdr[13] = { w >> 24, w >> 16, w >> 8, w, h >> 24, h >> 16, h >> 8, h, 8, 2, 0, 0, 0 };
@@ -22,6 +23,7 @@ static int png_write(const char *path, const uint8_t *rgba, int w, int h) {
   size_t raw = (size_t)h * (w * 3 + 1);
   uint8_t *z = malloc(raw + raw / 65535 * 5 + 16), *p = z;
   uint8_t *rawb = malloc(raw), *q = rawb;
+  if (!z || !rawb) { free(z); free(rawb); fclose(f); return 0; }
   for (int y = 0; y < h; y++) { *q++ = 0; for (int x = 0; x < w; x++) { const uint8_t *s = rgba + (y * w + x) * 4; *q++ = s[0]; *q++ = s[1]; *q++ = s[2]; } }
   *p++ = 0x78; *p++ = 0x01;
   uint32_t a = 1, b = 0;
@@ -33,5 +35,5 @@ static int png_write(const char *path, const uint8_t *rgba, int w, int h) {
   }
   *p++ = b >> 8; *p++ = b; *p++ = a >> 8; *p++ = a;
   png_chunk(f, "IDAT", z, p - z); png_chunk(f, "IEND", 0, 0);
-  free(z); free(rawb); fclose(f); return 1;
+  free(z); free(rawb); int failed = ferror(f); if (fclose(f)) failed = 1; return !failed;
 }

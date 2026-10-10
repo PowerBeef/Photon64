@@ -33,14 +33,15 @@ for (const [code, rev, kind, auto, what] of [
 
 // real cartridges: boot with and without the pak, then look at what the boot code left and how memory behaves
 for (const file of process.argv.slice(2)) {
-  if (!fs.existsSync(file)) { console.log('skip', file); continue; }
+  if (!fs.existsSync(file)) { console.log('FAIL missing ROM', file); bad++; continue; }
   const rom = new Uint8Array(fs.readFileSync(file));
   for (const [mode, size] of [[1, 0x800000], [2, 0x400000]]) {
     const e = make(); load(e, rom, mode);
     for (let i = 0; i < 120; i++) while (e.n64_frame()) e.n64_sync_done();
     const sz = [word(e, 0x318), word(e, 0x3F0)];
     check(`${file} ${size >> 20} MB: memory size left for the game by the boot code`, sz.includes(size) && !sz.includes(size ^ 0xC00000), true);
-    check(`${file} ${size >> 20} MB: running (frames ${new Uint32Array(e.memory.buffer, new Uint32Array(e.memory.buffer, e.n64_host_info(), 32)[21], 4)[0]})`, true, true);
+    const frames = new Uint32Array(e.memory.buffer, new Uint32Array(e.memory.buffer, e.n64_host_info(), 32)[21], 4)[0];
+    check(`${file} ${size >> 20} MB: completed 120 fields`, frames, 120);
   }
 }
 console.log(bad ? `${bad} FAILED` : 'all passed');

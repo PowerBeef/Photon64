@@ -105,11 +105,14 @@ static u32 heap_top;
 #define HOST_SCRATCH_WORDS (1u << 21)
 #define HEAP_START (((u32)(uintptr_t)&__heap_base + 0xFFFF) & ~0xFFFFu)
 EXPORT(n64_alloc) void *n64_alloc(u32 size) {
+  if (!size || size > 64u * 1024 * 1024) return 0;
   if (!heap_top) heap_top = HEAP_START + HOST_SCRATCH_WORDS * 4;
   u32 p = heap_top;
-  heap_top = (heap_top + size + 0xFFFF) & ~0xFFFFu;
+  if (heap_top > 0xFFFF0000u || size > 0xFFFF0000u - heap_top) return 0;
+  u32 end = (heap_top + size + 0xFFFF) & ~0xFFFFu;
   u32 pages = __builtin_wasm_memory_size(0);
-  if (heap_top > pages * 65536u) { if (__builtin_wasm_memory_grow(0, (heap_top - pages * 65536u + 65535) / 65536) == (size_t)-1) return 0; }
+  if (end > pages * 65536u) { if (__builtin_wasm_memory_grow(0, (end - pages * 65536u + 65535) / 65536) == (size_t)-1) return 0; }
+  heap_top = end;
   return (void *)(uintptr_t)p;
 }
 EXPORT(n64_free_all) void n64_free_all(void) { heap_top = 0; }

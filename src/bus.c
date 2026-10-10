@@ -105,10 +105,10 @@ static void flash_command(u32 cmd) {
     case 0xA5: sys.fl_erase_off = (cmd & 0xFFFF) * 128; sys.fl_status = 0x1111800400C2001Eull; break;
     case 0xB4: sys.fl_mode = FL_WRITE; break;
     case 0xD2:
-      if (sys.fl_mode == FL_ERASE) { memset(savemem + (sys.fl_erase_off & 0x1FF80), 0xFF, 128); sys.save_dirty = 1; }
+      if (sys.fl_mode == FL_ERASE) { memset(savemem + (sys.fl_erase_off & 0x1FF80), 0xFF, 128); if (++sys.save_dirty == 0) ++sys.save_dirty; }
       else if (sys.fl_mode == FL_WRITE) {
         for (u32 i = 0; i < 128; i++) savemem[(sys.fl_erase_off + i) & 0x1FFFF] = rdram[((sys.fl_write_off + i) & (RDRAM_MAX - 1)) ^ 3];
-        sys.save_dirty = 1;
+        if (++sys.save_dirty == 0) ++sys.save_dirty;
       }
       break;
     case 0xE1: sys.fl_mode = FL_STATUS; sys.fl_status = 0x1111800100C2001Eull; break;
@@ -216,7 +216,7 @@ static void pi_dma_read(void) {
       if (sys.fl_mode == FL_WRITE) sys.fl_write_off = dram;
     } else if (sys.save_type == SAVE_SRAM) {
       for (u32 i = 0; i < len; i++) savemem[(cart + i) & 0x7FFF] = rdram[((dram + i) & (RDRAM_MAX - 1)) ^ 3];
-      sys.save_dirty = 1;
+      if (++sys.save_dirty == 0) ++sys.save_dirty;
     }
   }
   sys.pi[0] = (dram + len + 7) & ~7u;
@@ -271,7 +271,7 @@ static void joybus(int ch, u32 tx, u32 rx, u8 *cmd, u8 *res, u8 *rxp) {
       case 0x03: {
         if (tx < 35 || rx < 1) { *rxp |= 0x80; break; }  // address + 32B payload in, crc ack out
         u32 addr = ((cmd[1] << 8) | cmd[2]) & 0xFFE0;
-        if (sys.pak[ch] == 1 && addr < 0x8000) { memcpy(mempak[ch] + addr, cmd + 3, 32); sys.save_dirty = 1; }
+        if (sys.pak[ch] == 1 && addr < 0x8000) { memcpy(mempak[ch] + addr, cmd + 3, 32); if (++sys.save_dirty == 0) ++sys.save_dirty; }
         else if (sys.pak[ch] == 2 && addr == 0xC000) sys.rumble[ch] = cmd[3] & 1;
         res[0] = pak_crc(cmd + 3);
         if (!sys.pak[ch]) res[0] ^= 0xFF;
@@ -294,7 +294,7 @@ static void joybus(int ch, u32 tx, u32 rx, u8 *cmd, u8 *res, u8 *rxp) {
         memcpy(res, eeprom + (cmd[1] % blocks) * 8, 8); break;
       case 0x05:
         if (tx < 10 || rx < 1) { *rxp |= 0x80; break; }
-        memcpy(eeprom + (cmd[1] % blocks) * 8, cmd + 1 + 1, 8); res[0] = 0; sys.save_dirty = 1; break;
+        memcpy(eeprom + (cmd[1] % blocks) * 8, cmd + 1 + 1, 8); res[0] = 0; if (++sys.save_dirty == 0) ++sys.save_dirty; break;
       default: *rxp |= 0x80; break;
     }
     return;
@@ -312,6 +312,7 @@ static void pif_process(void) {
     if (tx == 0xFF) { i++; continue; }
     if (tx == 0x00 || tx == 0xFD) { ch++; i++; continue; }
     tx &= 0x3F;
+    if (!tx) { r[i + 1] |= 0x80; break; }
     u32 rx = r[i + 1] & 0x3F;
     if (i + 2 + tx + rx > 64) break;
     r[i + 1] &= 0x3F;

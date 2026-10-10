@@ -45,6 +45,9 @@ function chunk(startMarker) {
 const parts = [
   line('const MAX_ROM'),
   chunk('function checkRomSize'),
+  line('const MAX_ARCHIVE'),
+  chunk('async function readBounded'),
+  chunk('function crc32'),
   chunk('async function unzip'),
   src.slice(src.indexOf('let _mbuf'), src.indexOf('\n', src.indexOf('const u32v = '))),
   line('const SLOTS = '),
@@ -65,18 +68,20 @@ function zip(entries) {
     const comp = e.method === 8 ? zlib.deflateRawSync(raw) : raw;
     const lh = Buffer.alloc(30);
     lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(e.method, 8);
+    lh.writeUInt32LE(zlib.crc32(raw), 14);
     lh.writeUInt32LE(e.csize ?? comp.length, 18); lh.writeUInt32LE(e.usize ?? raw.length, 22);
     lh.writeUInt16LE(name.length, 26);
     chunks.push(lh, name, comp);
     const ch = Buffer.alloc(46);
     ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(e.method, 10);
+    ch.writeUInt32LE(zlib.crc32(raw), 16);
     ch.writeUInt32LE(e.csize ?? comp.length, 20); ch.writeUInt32LE(e.usize ?? raw.length, 24);
     ch.writeUInt16LE(name.length, 28); ch.writeUInt32LE(e.off ?? off, 42);
     central.push(ch, name);
     off += 30 + name.length + comp.length;
   }
   const cdOff = off, cd = Buffer.concat(central), end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10);
   end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(entries[0].cdOff ?? cdOff, 16);
   return new Uint8Array(Buffer.concat([...chunks, cd, end]));
 }
@@ -104,17 +109,24 @@ check('zip oversize usize rejected', await t.unzip(zip([{ name: 'game.z64', data
   .then(() => false, e => /too large/.test(e.message)));
 check('zip deflate size lie rejected', await t.unzip(zip([{ name: 'game.z64', data: rom, method: 8, usize: 0x2000 }]))
   .then(() => false, e => /corrupt/.test(e.message)));
+check('zip expansion beyond declared budget rejected', await t.unzip(zip([{ name: 'game.z64', data: payload(0x20000, 7), method: 8, usize: 0x1000 }]))
+  .then(() => false, e => /too large|corrupt/.test(e.message)));
+check('zip CRC mismatch rejected', await (() => { const b = zip([{ name: 'game.z64', data: rom, method: 0 }]); b[50] ^= 1; return t.unzip(b); })()
+  .then(() => false, e => /CRC/.test(e.message)));
+check('zip invalid local signature rejected', await (() => { const b = zip([{ name: 'game.z64', data: rom, method: 0 }]); b[0] = 0; return t.unzip(b); })()
+  .then(() => false, e => /valid/.test(e.message)));
+check('zip encrypted flags rejected', await (() => { const b = zip([{ name: 'game.z64', data: rom, method: 0 }]); const d = new DataView(b.buffer); const cd = d.getUint32(b.length - 6, true); d.setUint16(cd + 8, 1, true); return t.unzip(b); })()
+  .then(() => false, e => /flags/.test(e.message)));
 check('checkRomSize 64MB ok / 64MB+1 throws', (() => {
   try { t.checkRomSize(64 * 1024 * 1024); } catch { return false; }
   try { t.checkRomSize(64 * 1024 * 1024 + 1); return false; } catch (e) { return /too large/.test(e.message); }
 })());
 check('views cached, refreshed on buffer swap', (() => {
-  const v = mk({ ex: { memory: { buffer: new ArrayBuffer(16) } } });
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const v = mk({ ex: { memory } });
   if (v.u8v() !== v.u8v() || v.u32v() !== v.u32v()) return false;
-  const nb = new ArrayBuffer(32);
-  v.u8v(); // bound to old buffer
-  const vv = mk({ ex: { memory: { buffer: nb } } });
-  return vv.u8v().buffer === nb && vv.u8v() === vv.u8v() && vv.u8v() !== v.u8v();
+  const old = v.u8v(); memory.grow(1);
+  return old.byteLength === 0 && v.u8v().buffer === memory.buffer && v.u8v() !== old && v.u32v().buffer === memory.buffer;
 })());
 check('stateMeta backfills every slot', await (async () => {
   const store = new Map([['state:k', new ArrayBuffer(8)], ['state:k:2', new ArrayBuffer(8)]]);

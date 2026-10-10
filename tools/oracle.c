@@ -110,5 +110,5 @@ int main(int argc, char **argv) {
   printf("colour differences larger than one dither step: %llu pixels in %d frames\n", tot_big, frames_big);
   printf("TOTAL: %d rdp frames, %llu pixels, %llu color mismatches (%.5f%%), %llu z mismatches (%.5f%%)\n", frame_no, tot_px, tot_bad,
          100.0 * tot_bad / (tot_px ? tot_px : 1), tot_zbad, 100.0 * tot_zbad / (tot_px ? tot_px : 1));
-  return 0;
+  return !frame_no || !tot_px || tot_bad || tot_zbad;
 }

@@ -106,6 +106,11 @@ int main(void) {
   pif_process();
   t_check("0x00 short rx: clamps, no error", !err_bit(1) && sys.pif[3] == 0x05 && sentinels_ok(4, 64));
 
+  u8 zero_tx[] = { 0x40, 3, 0x00, 0xFE };
+  pif_setup(zero_tx, sizeof zero_tx); sys.pad_present[0] = 1; sys.pak[0] = 1;
+  pif_process();
+  t_check("masked zero TX rejected before adjacent command dispatch", err_bit(1) && sentinels_ok(4, 64) && sys.pif[2] == 0 && sys.pif[3] == 0xFE);
+
   printf("%d checks, %d failures\n", t_n, t_bad);
   return t_bad != 0;
 }

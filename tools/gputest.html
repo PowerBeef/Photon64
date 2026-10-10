@@ -119,6 +119,11 @@ window.runTest = async function (cfg) {
           const pixels = w * h, cIdx = fmt === 4 ? addr * 2 : addr, cCnt = fmt === 4 ? pixels * 2 : pixels;
           const rd = new DataView(bm, hb[0], 0x800000), hid = new Uint8Array(bm, hb[19], 0x400000), sh16 = new Uint16Array(bm, hb[20], 0x400000);
           const cmp = async (idx, cnt) => {
+            // readFb inspects the GPU cache, not coherent RDRAM. Upload CPU-owned
+            // changes first, including an unused depth address (often zero).
+            // sync_scan preserves GPU-owned words, so actual render differences
+            // still reach the independent software comparison below.
+            gpu.syncRange(idx, cnt);
             const g = await gpu.readFb(idx, cnt);
             let dc = 0, dh = 0, first = -1; const fl = [];
             for (let k = 0; k < cnt; k++) {
@@ -195,6 +200,7 @@ window.runMulti = async function (cfg) {
       const rd = new DataView(bm, hb[0], 0x800000), hid = new Uint8Array(bm, hb[19], 0x400000), sh16 = new Uint16Array(bm, hb[20], 0x400000);
       const cmp = async (idx, cnt) => {
         cnt = Math.min(cnt, 0x400000 - idx); if (cnt <= 0) return [0, 0];
+        gpu.syncRange(idx, cnt);
         const g = await gpu.readFb(idx, cnt);
         let dc = 0, dh = 0;
         for (let k = 0; k < cnt; k++) {

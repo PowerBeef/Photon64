@@ -392,13 +392,13 @@ static inline void fp_cmp(u32 cond, int unord, int eq, int lt) {
 }
 
 // Shared tail of arithmetic results: maps IEEE outcomes onto the VR4300's flags/traps. Returns 1 if a trap was taken.
-static int fp_finish_s(float *res, int nan_in, int divz, int inexact, int tiny) {
+static int fp_finish_s(float *res, int nan_in, int divz, int inexact, int tiny, int finite_in) {
   float f = *res;
   u32 u = f32_bits(f), e = (u >> 23) & 0xFF, m = u & 0x7FFFFF;
   int trap = 0;
   if (divz) trap |= fpe_set(FE_Z);
   if (e == 0xFF && !divz && !nan_in) {
-    if (m) trap |= fpe_set(FE_V); else { trap |= fpe_set(FE_O); trap |= fpe_set(FE_I); }
+    if (m) trap |= fpe_set(FE_V); else if (finite_in) { trap |= fpe_set(FE_O); trap |= fpe_set(FE_I); }
   } else if ((e == 0 && m) || tiny) {
     if (!(cpu.fcr31 & (1u << 24)) || (cpu.fcr31 & 0x180)) { cpu.fcr31 |= 1u << 17; cpu_exception(EXC_FPE, 0); return 1; }
     fpe_set(FE_U); fpe_set(FE_I);
@@ -408,13 +408,13 @@ static int fp_finish_s(float *res, int nan_in, int divz, int inexact, int tiny) 
   if (e == 0xFF && m) { union { u32 u; float f; } n = { 0x7FBFFFFF }; *res = n.f; }
   return 0;
 }
-static int fp_finish_d(double *res, int nan_in, int divz, int inexact, int tiny) {
+static int fp_finish_d(double *res, int nan_in, int divz, int inexact, int tiny, int finite_in) {
   double d = *res;
   u64 u = f64_bits(d); u32 e = (u32)(u >> 52) & 0x7FF; u64 m = u & 0xFFFFFFFFFFFFFull;
   int trap = 0;
   if (divz) trap |= fpe_set(FE_Z);
   if (e == 0x7FF && !divz && !nan_in) {
-    if (m) trap |= fpe_set(FE_V); else { trap |= fpe_set(FE_O); trap |= fpe_set(FE_I); }
+    if (m) trap |= fpe_set(FE_V); else if (finite_in) { trap |= fpe_set(FE_O); trap |= fpe_set(FE_I); }
   } else if ((e == 0 && m) || tiny) {
     if (!(cpu.fcr31 & (1u << 24)) || (cpu.fcr31 & 0x180)) { cpu.fcr31 |= 1u << 17; cpu_exception(EXC_FPE, 0); return 1; }
     fpe_set(FE_U); fpe_set(FE_I);
@@ -477,7 +477,7 @@ static NOINLINE void cop1_exec(u32 op) {
     case 8: {                                                          // BC1
       int c = (cpu.fcr31 >> 23) & 1;
       int want = rt & 1, likely = rt & 2;
-      u32 target = cpu.pc + ((s32)(s16)op << 2);
+      u32 target = cpu.pc + ((s32)(s16)op * 4);
       cpu.fcr31 &= ~0x3F000u;
       if (c == want) { cpu.npc = target; cpu.branch = 1; }
       else if (likely) { cpu.pc += 4; cpu.npc += 4; }
@@ -502,6 +502,7 @@ static NOINLINE void cop1_exec(u32 op) {
       switch (fn) {
         case 0: case 1: case 2: case 3: {
           if (fp_in2(f32_class(a), f32_class(b), &nan)) return;
+          int afin = (f32_bits(a) & 0x7F800000u) != 0x7F800000u, bfin = (f32_bits(b) & 0x7F800000u) != 0x7F800000u;
           double da = a, db = b, d; int inexact = 0, divz = 0, tiny = 0;
           if (fn == 0 || fn == 1) {
             if (fn == 1) db = -db;
@@ -515,22 +516,22 @@ static NOINLINE void cop1_exec(u32 op) {
             inexact = !divz && (f32_bits(r) & 0x7F800000) != 0x7F800000 && (double)r * db != da;
             tiny = r == 0 && a != 0 && (f32_bits(b) & 0x7F800000) != 0x7F800000;
           }
-          if (fp_finish_s(&r, nan, divz, inexact, tiny)) return;
+          if (fp_finish_s(&r, nan, divz, inexact, tiny, afin && bfin)) return;
           DST_S(fd, r); return;
         }
         case 4:
           if (fp_in1(f32_class(a), &nan)) return;
           r = f_sqrtf(a);
-          if (fp_finish_s(&r, nan, 0, r == r && (double)r * (double)r != (double)a, 0)) return;
+          if (fp_finish_s(&r, nan, 0, r == r && (double)r * (double)r != (double)a, 0, (f32_bits(a) & 0x7F800000u) != 0x7F800000u)) return;
           DST_S(fd, r); return;
         case 5: case 7:
           if (fp_in1(f32_class(a), &nan)) return;
           r = fn == 5 ? __builtin_fabsf(a) : -a;
-          if (fp_finish_s(&r, nan, 0, 0, 0)) return;
+          if (fp_finish_s(&r, nan, 0, 0, 0, (f32_bits(a) & 0x7F800000u) != 0x7F800000u)) return;
           DST_S(fd, r); return;
         case 8: case 9: case 10: case 11: case 37: { s64 v; if (fp_conv_l(a, f32_class(a), fn == 37 ? cpu.fcr31 : fn, &v)) return; DST_L(fd, v); return; }
         case 12: case 13: case 14: case 15: case 36: { s32 v; if (fp_conv_w(a, f32_class(a), fn == 36 ? cpu.fcr31 : fn, &v)) return; DST_W(fd, v); return; }
-        case 33: { if (fp_in1(f32_class(a), &nan)) return; double d = (double)a; if (fp_finish_d(&d, nan, 0, 0, 0)) return; DST_D(fd, d); return; }
+        case 33: { if (fp_in1(f32_class(a), &nan)) return; double d = (double)a; if (fp_finish_d(&d, nan, 0, 0, 0, (f32_bits(a) & 0x7F800000u) != 0x7F800000u)) return; DST_D(fd, d); return; }
         default: FPE_UNIMPL();
       }
     }
@@ -568,7 +569,7 @@ static NOINLINE void cop1_exec(u32 op) {
             if (!divz && afin && bfin && r == r) { double p, e; two_prod(r, b, &p, &e); inexact = ((a - p) - e) != 0; }
             tiny = r == 0 && a != 0 && bfin;
           }
-          if (fp_finish_d(&r, nan, divz, inexact, tiny)) return;
+          if (fp_finish_d(&r, nan, divz, inexact, tiny, afin && bfin)) return;
           DST_D(fd, r); return;
         }
         case 4: {
@@ -576,20 +577,20 @@ static NOINLINE void cop1_exec(u32 op) {
           r = f_sqrt(a);
           int inexact = 0;
           if (r == r && (f64_bits(a) & 0x7FF0000000000000ull) != 0x7FF0000000000000ull) { double p, e; two_prod(r, r, &p, &e); inexact = ((a - p) - e) != 0; }
-          if (fp_finish_d(&r, nan, 0, inexact, 0)) return;
+          if (fp_finish_d(&r, nan, 0, inexact, 0, (f64_bits(a) & 0x7FF0000000000000ull) != 0x7FF0000000000000ull)) return;
           DST_D(fd, r); return;
         }
         case 5: case 7:
           if (fp_in1(f64_class(a), &nan)) return;
           r = fn == 5 ? __builtin_fabs(a) : -a;
-          if (fp_finish_d(&r, nan, 0, 0, 0)) return;
+          if (fp_finish_d(&r, nan, 0, 0, 0, (f64_bits(a) & 0x7FF0000000000000ull) != 0x7FF0000000000000ull)) return;
           DST_D(fd, r); return;
         case 8: case 9: case 10: case 11: case 37: { s64 v; if (fp_conv_l(a, f64_class(a), fn == 37 ? cpu.fcr31 : fn, &v)) return; DST_L(fd, v); return; }
         case 12: case 13: case 14: case 15: case 36: { s32 v; if (fp_conv_w(a, f64_class(a), fn == 36 ? cpu.fcr31 : fn, &v)) return; DST_W(fd, v); return; }
         case 32: {
           if (fp_in1(f64_class(a), &nan)) return;
           float f = (float)a;
-          if (fp_finish_s(&f, nan, 0, (double)f != a, f == 0 && a != 0)) return;
+          if (fp_finish_s(&f, nan, 0, (double)f != a, f == 0 && a != 0, (f64_bits(a) & 0x7FF0000000000000ull) != 0x7FF0000000000000ull)) return;
           DST_S(fd, f); return;
         }
         default: FPE_UNIMPL();
@@ -698,12 +699,12 @@ void cpu_run(void) {
           case 0x27: R[RDI] = ~(R[RSI] | R[RTI]); break;
           case 0x2A: R[RDI] = R[RSI] < R[RTI]; break;
           case 0x2B: R[RDI] = (u64)R[RSI] < (u64)R[RTI]; break;
-          case 0x2D: R[RDI] = R[RSI] + R[RTI]; break;                                      // DADDU
-          case 0x2F: R[RDI] = R[RSI] - R[RTI]; break;                                      // DSUBU
-          case 0x38: R[RDI] = R[RTI] << SAI; break;                                        // DSLL
+          case 0x2D: R[RDI] = (s64)((u64)R[RSI] + (u64)R[RTI]); break;                      // DADDU
+          case 0x2F: R[RDI] = (s64)((u64)R[RSI] - (u64)R[RTI]); break;                      // DSUBU
+          case 0x38: R[RDI] = (s64)((u64)R[RTI] << SAI); break;                                        // DSLL
           case 0x3A: R[RDI] = (s64)((u64)R[RTI] >> SAI); break;                            // DSRL
           case 0x3B: R[RDI] = R[RTI] >> SAI; break;                                        // DSRA
-          case 0x3C: R[RDI] = R[RTI] << (SAI + 32); break;                                 // DSLL32
+          case 0x3C: R[RDI] = (s64)((u64)R[RTI] << (SAI + 32)); break;                                 // DSLL32
           case 0x3E: R[RDI] = (s64)((u64)R[RTI] >> (SAI + 32)); break;                     // DSRL32
           case 0x3F: R[RDI] = R[RTI] >> (SAI + 32); break;                                 // DSRA32
           default: exec_special_slow(op); break;
@@ -767,7 +768,7 @@ void cpu_run(void) {
       case 22: BRANCHL(R[RSI] <= 0); break;
       case 23: BRANCHL(R[RSI] > 0); break;
       case 24: { s64 res; if (__builtin_add_overflow(R[RSI], (s64)SIMM, &res)) cpu_exception(EXC_OV, 0); else R[RTI] = res; break; }       // DADDI
-      case 25: R[RTI] = R[RSI] + (s64)SIMM; break;                                          // DADDIU
+      case 25: R[RTI] = (s64)((u64)R[RSI] + (u64)(s64)SIMM); break;                         // DADDIU
       case 26: {                                                                            // LDL
         u32 va = EA; u64 m; if (!rd64u(va & ~7u, &m)) break;
         u32 sh = 8 * (va & 7);
@@ -801,35 +802,27 @@ void cpu_run(void) {
       case 39: LOAD(4, *(u32 *)(p + o), u32); break;                                        // LWU
       case 40: STORE(1, p[o ^ 3] = (u8)R[RTI]); break;                                      // SB
       case 41: STORE(2, *(u16 *)(p + (o ^ 2)) = (u16)R[RTI]); break;                        // SH
-      case 42: {                                                                            // SWL
-        u32 va = EA, m; if (!rd32u(va & ~3u, &m)) break;
-        u32 sh = 8 * (va & 3);
-        u32 v = ((u32)R[RTI] >> sh) | (m & (sh ? (0xFFFFFFFFu << (32 - sh)) : 0));
-        uintptr_t e = map_w[va >> 12];
-        if (likely(e)) *(u32 *)(e + (va & 0xFFC)) = v; else wr_slow(va & ~3u, 4, v);
+      case 42: case 46: {  // SWL / SWR
+        u32 va = EA, pa;
+        if (!translate(va, 1, &pa)) break;
+        u32 sh = 8 * ((op >> 26) == 42 ? (va & 3) : (3 - (va & 3)));
+        u32 mask = (op >> 26) == 42 ? (0xFFFFFFFFu >> sh) : (0xFFFFFFFFu << sh);
+        u32 v = (op >> 26) == 42 ? ((u32)R[RTI] >> sh) : ((u32)R[RTI] << sh);
+        bus_write32(pa & ~3u, v, mask);
+        if (unlikely(cpu_restart)) restart_insn();
         break;
       }
-      case 43: STORE(4, *(u32 *)(p + o) = (u32)R[RTI]); break;                              // SW
-      case 44: {                                                                            // SDL
-        u32 va = EA; u64 m; if (!rd64u(va & ~7u, &m)) break;
-        u32 sh = 8 * (va & 7);
-        u64 v = ((u64)R[RTI] >> sh) | (m & (sh ? (~0ull << (64 - sh)) : 0));
-        wr_slow(va & ~7u, 8, v);
-        break;
-      }
-      case 45: {                                                                            // SDR
-        u32 va = EA; u64 m; if (!rd64u(va & ~7u, &m)) break;
-        u32 sh = 8 * (7 - (va & 7));
-        u64 v = ((u64)R[RTI] << sh) | (m & (sh ? (~0ull >> (64 - sh)) : 0));
-        wr_slow(va & ~7u, 8, v);
-        break;
-      }
-      case 46: {                                                                            // SWR
-        u32 va = EA, m; if (!rd32u(va & ~3u, &m)) break;
-        u32 sh = 8 * (3 - (va & 3));
-        u32 v = ((u32)R[RTI] << sh) | (m & (sh ? (0xFFFFFFFFu >> (32 - sh)) : 0));
-        uintptr_t e = map_w[va >> 12];
-        if (likely(e)) *(u32 *)(e + (va & 0xFFC)) = v; else wr_slow(va & ~3u, 4, v);
+      case 43: STORE(4, *(u32 *)(p + o) = (u32)R[RTI]); break;  // SW
+      case 44: case 45: {  // SDL / SDR
+        u32 va = EA, pa;
+        if (!translate(va, 1, &pa)) break;
+        u32 sh = 8 * ((op >> 26) == 44 ? (va & 7) : (7 - (va & 7)));
+        u64 mask = (op >> 26) == 44 ? (~0ull >> sh) : (~0ull << sh);
+        u64 v = (op >> 26) == 44 ? ((u64)R[RTI] >> sh) : ((u64)R[RTI] << sh);
+        pa &= ~7u;
+        if (mask >> 32) bus_write32(pa, v >> 32, mask >> 32);
+        if ((u32)mask) bus_write32(pa + 4, (u32)v, (u32)mask);
+        if (unlikely(cpu_restart)) restart_insn();
         break;
       }
       case 47: break;                                                                       // CACHE
@@ -876,7 +869,7 @@ static NOINLINE void exec_special_slow(u32 op) {
     case 0x0C: cpu_exception(EXC_SYS, 0); break;
     case 0x0D: cpu_exception(EXC_BP, 0); break;
     case 0x0F: break;                                                                       // SYNC
-    case 0x14: R[RDI] = R[RTI] << (R[RSI] & 63); break;                                     // DSLLV
+    case 0x14: R[RDI] = (s64)((u64)R[RTI] << (R[RSI] & 63)); break;                                     // DSLLV
     case 0x16: R[RDI] = (s64)((u64)R[RTI] >> (R[RSI] & 63)); break;                         // DSRLV
     case 0x17: R[RDI] = R[RTI] >> (R[RSI] & 63); break;                                     // DSRAV
     case 0x1A: {                                                                            // DIV

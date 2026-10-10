@@ -10,8 +10,9 @@
 #   tools/games.sh --check-roms [sm64|ge|pd|mk64 ...]   # report resolved ROM paths only
 #   GPU_RUNNER=dawn|browser forces one; DAWN_WEBGPU points at the bindings.
 cd "$(dirname "$0")/.." || exit 1
-set -o pipefail
-DAWN_WEBGPU=${DAWN_WEBGPU:-/home/claude/dawn/node_modules/webgpu/index.js}
+set -uo pipefail
+mkdir -p out
+DAWN_WEBGPU=${DAWN_WEBGPU:-$(pwd)/node_modules/webgpu/index.js}
 export DAWN_WEBGPU
 GPU_RUNNER=${GPU_RUNNER:-auto}
 if [ "$GPU_RUNNER" = auto ]; then
@@ -37,7 +38,7 @@ rom_for() {  # short name -> usable path; a root copy wins over roms/
   esac
   [ -f "roms/$r" ] && echo "roms/$r"
 }
-if [ "$1" = --check-roms ]; then
+if [ "${1:-}" = --check-roms ]; then
   shift; fail=0
   for g in ${@:-sm64 ge pd mk64}; do
     if rom=$(rom_for "$g"); then echo "$g: $rom"; else echo "$g: ROM not present"; fail=1; fi
@@ -46,7 +47,7 @@ if [ "$1" = --check-roms ]; then
 fi
 fail=0
 for g in ${@:-sm64 ge pd mk64}; do
-  rom=$(rom_for "$g") || { echo "$g: ROM not present, skipped"; continue; }
+  rom=$(rom_for "$g") || { echo "$g: ROM not present, required lane failed"; fail=1; continue; }
   I=$(cat tools/inputs/$g.txt); n=$(frames_for $g)
   echo "== $g: software renderer vs. reference"
   if [ -x ./out/oracle_nn ]; then
@@ -57,18 +58,19 @@ for g in ${@:-sm64 ge pd mk64}; do
   fi
   for mode in "" "--hd 0"; do
     echo "== $g: WebGPU vs. software via $GPU_RUNNER${mode:+, high-resolution path at 1x}"
-    node tools/$runner "$rom" $n "$(checks_for $g)" "$I" $mode > out/games_$g.log 2>&1
-    $PY tools/gpures.py out/games_$g.log > out/games_$g.txt
-    bad=$(grep -c -v "vi 0 0 sync True" out/games_$g.txt)   # (the last line is the statistics line)
-    grep -c "vi 0 0 sync True" out/games_$g.txt | sed 's/$/ checkpoints exact/'
-    [ "$bad" -gt 1 ] && { fail=1; grep -v "vi 0 0 sync True" out/games_$g.txt | head -5 | cut -c1-200; }
-    tail -1 out/games_$g.txt | cut -c1-200
+    tag=native; [ -n "$mode" ] && tag=hd1
+    log="out/games_${g}_${tag}.log"
+    if ! node tools/$runner "$rom" "$n" "$(checks_for "$g")" "$I" $mode > "$log" 2>&1; then
+      echo "$g: GPU runner failed; see $log"; fail=1
+    fi
+    if ! $PY tools/gpures.py "$log" "$(checks_for "$g")"; then fail=1; fi
   done
   if [ $g = mk64 ]; then
     echo "== $g: joints between texture tiles at 4x"
     # (--hdwords: the first 4 MB of RDRAM, which is all this game draws to, fits lavapipe's 128 MB buffer limit at 4x)
     hdw=""; [ "$GPU_RUNNER" = dawn ] && hdw="--hdwords 2097152"   # lavapipe-only buffer workaround
     node tools/$runner "$rom" 1310 "500,700,1300" "$I" --hd 2 $hdw --window 6 --noref --images out/games_${g}_hd > out/games_${g}_hd.log 2>&1
+    status=$?; [ "$status" -eq 0 ] || [ "$status" -eq 2 ] || { fail=1; continue; }
     $PY tools/hdseams.py out/games_${g}_hd_00500.png 4 0 140 320 232 "title backdrop (2-line strips)" 2.2 y || fail=1
     $PY tools/hdseams.py out/games_${g}_hd_01300.png 4 51 16 271 48 "heading (4-line strips)" 1.75 y || fail=1
     $PY tools/hdseams.py out/games_${g}_hd_01300.png 4 122 64 128 126 "portrait, vertical joint" 1.75 x || fail=1

@@ -57,7 +57,7 @@ async function initGpu() {
   try {
     gpu = await N64Gpu.create({ ex }, $('cv-gpu'), Object.assign({ allowFallback: /[?&#]gpu=force/.test(location.href) }, SHADERS));
     if (!gpu) { gpuErr = navigator.gpu ? 'no suitable adapter' : 'WebGPU not available in this browser'; return; }
-    gpu.onLost = info => { toast('WebGPU device lost — switched to software rendering'); gpu = null; gpuErr = 'device lost'; if (ex) ex.n64_sync_done(); applyRenderer(); updatePills(); };
+    gpu.onLost = info => { gpuErr = 'device lost'; rendererFailure(new Error(info.message || gpuErr)); updatePills(); };
     let desc = 'WebGPU';
     try { desc = gpuName(gpu.adapter.info || {}); } catch (e) { /* older browsers */ }
     gpu.desc = desc;
@@ -65,7 +65,7 @@ async function initGpu() {
 }
 
 function applyRenderer() {
-  if (busy) { busy.then(applyRenderer); return; }      // (a field is waiting for GPU results: switch afterwards)
+  if (busy) { busy.then(applyRenderer, rendererFailure); return; }      // (a field is waiting for GPU results: switch afterwards)
   const want = settings.renderer !== 'sw' && !!gpu;
   $('cv-gpu').hidden = !want; $('cv-sw').hidden = want;
   if (want) {
@@ -74,7 +74,7 @@ function applyRenderer() {
   } else if (useGpu && ex) {
     // leaving GPU mode: finish pending work there, copy the results back, then render in software
     ex.n64_config(6, 0);
-    if (gpu) { const p = gpu.syncToCpu().catch(() => {}).then(() => { ex.n64_config(0, 0); if (busy === p) busy = null; }); busy = p; }
+    if (gpu) { const p = gpu.syncToCpu().then(() => { ex.n64_config(0, 0); }).catch(rendererFailure).finally(() => { if (busy === p) busy = null; }); busy = p; }
     else { ex.n64_config(0, 0); ex.n64_sync_done(); }
   } else if (ex) ex.n64_config(0, 0);                    // (make sure the core itself is rendering in software)
   useGpu = want;
@@ -106,75 +106,142 @@ async function applyScale() {
   }
 }
 
+// Session operations queue in invocation order. The frame loop stays suspended
+// across every await; pause intent remains owned by togglePause, not saved booleans.
+let sessionTail = Promise.resolve(), rendererFailed = false;
+function sessionOp(fn) {
+  const result = sessionTail.then(async () => {
+    running = false;
+    try { if (busy) await busy; return await fn(); }
+    finally { running = !!rom && !rendererFailed; acc = 0; }
+  });
+  sessionTail = result.catch(() => {});
+  return result;
+}
+function rendererFailure(error) {
+  console.error(error); rendererFailed = true; running = false; paused = true;
+  toast('Renderer synchronization failed. Export your battery save, then reset or reopen the game.', 10000);
+  updateFlag();
+}
+
 // ---------------------------------------------------------------------------------------------- ROM
 const MAX_ROM = 64 * 1024 * 1024;   // biggest licensed N64 cartridge: 512 Mbit
 function checkRomSize(n) { if (n > MAX_ROM) throw new Error('That file is too large to be an N64 ROM'); }
+const MAX_ARCHIVE = MAX_ROM + 1024 * 1024;
+function validateRom(data) {
+  checkRomSize(data.length);
+  if (data.length < 0x1000) throw new Error('That does not look like an N64 ROM');
+  const magic = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(0);
+  if (![0x80371240, 0x37804012, 0x40123780].includes(magic)) throw new Error('That does not look like an N64 ROM');
+  return magic;
+}
+async function readBounded(stream, limit) {
+  const reader = stream.getReader(), chunks = []; let size = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      if (value.length > limit - size) { await reader.cancel('size limit'); throw new Error('That compressed file is corrupt or too large'); }
+      size += value.length; chunks.push(value);
+    }
+  } catch (e) { await reader.cancel().catch(() => {}); throw e; }
+  finally { reader.releaseLock(); }
+  const out = new Uint8Array(size); let offset = 0;
+  for (const c of chunks) { out.set(c, offset); offset += c.length; }
+  return out;
+}
+function crc32(data) {
+  let c = 0xFFFFFFFF;
+  for (const b of data) { c ^= b; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ ((c & 1) ? 0xEDB88320 : 0); }
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
 async function unzip(u8) {
+  if (u8.length > MAX_ARCHIVE) throw new Error('That archive is too large');
   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const bounds = (p, n) => { if (p < 0 || p > u8.length - n) throw new Error('That zip file is truncated'); };
   let e = u8.length - 22;
   while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
   if (e < 0) throw new Error('Not a valid zip file');
+  bounds(e, 22);
+  if (e + 22 + dv.getUint16(e + 20, true) !== u8.length || dv.getUint16(e + 4, true) || dv.getUint16(e + 6, true) || dv.getUint16(e + 8, true) !== dv.getUint16(e + 10, true)) throw new Error('Not a valid single-disk zip file');
   let p = dv.getUint32(e + 16, true); const n = dv.getUint16(e + 10, true);
+  const cdEnd = p + dv.getUint32(e + 12, true); if (cdEnd > e) throw new Error('That zip file is truncated');
   let best = null;
-  for (let i = 0; i < n && dv.getUint32(p, true) === 0x02014b50; i++) {
+  for (let i = 0; i < n; i++) {
+    bounds(p, 46); if (p + 46 > cdEnd || dv.getUint32(p, true) !== 0x02014b50) throw new Error('Not a valid zip file');
+    const flags = dv.getUint16(p + 8, true), crc = dv.getUint32(p + 16, true);
     const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), usize = dv.getUint32(p + 24, true);
     const nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), off = dv.getUint32(p + 42, true);
+    bounds(p, 46 + nl + xl + cl); if (p + 46 + nl + xl + cl > cdEnd) throw new Error('That zip file is truncated');
     const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nl));
     const good = /\.(z64|n64|v64|rom|bin)$/i.test(name);
-    if (usize >= 0x1000 && (!best || (good && !best.good) || (good === best.good && usize > best.usize))) best = { method, csize, usize, off, name, good };
+    if (usize >= 0x1000 && (!best || (good && !best.good) || (good === best.good && usize > best.usize))) best = { method, csize, usize, off, name, good, flags, crc };
     p += 46 + nl + xl + cl;
   }
   if (!best) throw new Error('No ROM found inside the zip');
   if (best.usize > MAX_ROM) throw new Error('That ROM is too large');
+  if (best.flags & ~0x808) throw new Error('Unsupported zip flags');
   const lo = best.off;
   if (lo > u8.length - 30) throw new Error('That zip file is truncated');
+  if (dv.getUint32(lo, true) !== 0x04034b50 || dv.getUint16(lo + 8, true) !== best.method || dv.getUint16(lo + 6, true) !== best.flags) throw new Error('Not a valid zip local record');
   const start = lo + 30 + dv.getUint16(lo + 26, true) + dv.getUint16(lo + 28, true);
   if (start > u8.length || best.csize > u8.length - start) throw new Error('That zip file is truncated');
   const data = u8.subarray(start, start + best.csize);
   if (best.method === 0) {
     if (data.length !== best.usize) throw new Error('That zip file is corrupt');
+    if (crc32(data) !== best.crc) throw new Error('That zip file is corrupt (CRC)');
     return { data: data.slice(), name: best.name };
   }
   if (best.method !== 8 || !self.DecompressionStream) throw new Error('Unsupported zip compression');
-  const out = await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
+  const out = await readBounded(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw')), best.usize);
   if (out.byteLength !== best.usize) throw new Error('That zip file is corrupt');
-  return { data: new Uint8Array(out), name: best.name };
+  if (crc32(out) !== best.crc) throw new Error('That zip file is corrupt (CRC)');
+  return { data: out, name: best.name };
 }
 
 async function openFile(file) {
   try {
+    if (file.size > (/\.zip$/i.test(file.name) ? MAX_ARCHIVE : MAX_ROM)) throw new Error('That file is too large');
     let data = new Uint8Array(await file.arrayBuffer()), name = file.name;
     if (data[0] === 0x50 && data[1] === 0x4B) ({ data, name } = await unzip(data));
     await loadRom(data, name);
   } catch (e) { console.error(e); toast(String(e.message || e), 4000); }
 }
 
-async function loadRom(data, fileName, fromLibrary) {
-  checkRomSize(data.length);
-  running = false; romGen++;
-  if (busy) await busy;
-  await flushSaves();
-  ex.n64_free_all();
-  romSize = data.length & ~3;
-  romPtr = ex.n64_alloc(romSize);
-  if (!romPtr) throw new Error('Out of memory');
-  u8v().set(data.subarray(0, romSize), romPtr);
-  ex.n64_config(10, xpakMode());                         // before loading: the machine is built with or without the Expansion Pak
-  if (!ex.n64_load(romPtr, romSize)) throw new Error('That does not look like an N64 ROM');
-  // header (bytes are word-swapped in core memory)
-  const m = u8v(), hb = o => m[romPtr + (o ^ 3)];
+function loadRom(data, fileName, fromLibrary) {
+  validateRom(data);
+  const candidate = data.slice();
+  return sessionOp(() => loadRomNow(candidate, fileName, fromLibrary));
+}
+function romIdentity(data, fileName) {
+  const magic = validateRom(data);
+  const hb = o => data[magic === 0x80371240 ? o : magic === 0x37804012 ? o ^ 1 : o ^ 3];
   let title = ''; for (let i = 0x20; i < 0x34; i++) { const c = hb(i); title += c >= 32 && c < 127 ? String.fromCharCode(c) : ' '; }
   title = title.trim() || fileName.replace(/\.[^.]+$/, '');
   const id3 = String.fromCharCode(hb(0x3B), hb(0x3C), hb(0x3D));
   let crc = ''; for (let i = 0x10; i < 0x18; i++) crc += hb(i).toString(16).padStart(2, '0');
-  const saveType = u32v()[hi[15] >> 2];   // chosen by the core from the game ID
   // shown name: the file name without its extension and dump tags, e.g. "Mario Kart 64 (USA).z64" -> "Mario Kart 64"
   const name = (fileName || '').replace(/\.[^.]+$/, '').replace(/\s*[([].*$/, '').replace(/_/g, ' ').trim() || title;
-  rom = { title, name, file: fileName, id: id3, key: `${title}-${crc}`, saveType };
+  return { title, name, file: fileName, id: id3, key: `${title}-${crc}` };
+}
+async function loadRomNow(data, fileName, fromLibrary) {
+  const identity = romIdentity(data, fileName);
+  const sv = await idbGet('save:' + identity.key);
+  if (rom && !await flushSaves()) throw new Error('Battery save could not be stored. Export it before replacing this game.');
+  // One reusable maximum-size cartridge allocation. Validation and allocation
+  // failure cannot overwrite the previous game; no unbounded heap growth on loads.
+  const ptr = romPtr || ex.n64_alloc(MAX_ROM);
+  if (!ptr) throw new Error('Out of memory');
+  romGen++;
+  romPtr = ptr; romSize = data.length & ~3;
+  u8v().set(data.subarray(0, romSize), romPtr);
+  ex.n64_config(10, xpakMode());                         // before loading: the machine is built with or without the Expansion Pak
+  if (!ex.n64_load(romPtr, romSize)) throw new Error('That does not look like an N64 ROM');
+  const m = u8v(), saveType = u32v()[hi[15] >> 2];
+  rom = { ...identity, saveType };
+  const name = rom.name;
   // battery-backed memory
   m.fill(0, hi[12], hi[12] + 0x800); m.fill(saveType === 4 ? 0xFF : 0, hi[13], hi[13] + 0x20000); m.fill(0, hi[14], hi[14] + 0x20000);
   formatPaks();
-  const sv = await idbGet('save:' + rom.key);
   if (sv && sv.byteLength === 0x800 + 0x20000 + 0x20000) restoreSaveBlob(new Uint8Array(sv));
   u32v()[hi[16] >> 2] = 0;
   ex.n64_config(1, +settings.cpi); ex.n64_config(5, +settings.pak); ex.n64_config(9, settings.vif ? 0 : 1);
@@ -186,11 +253,11 @@ async function loadRom(data, fileName, fromLibrary) {
   paused = false; ffLock = false; updateFlag();
   menuThumb = '';
   audioStart(); if (actx) actx.resume().catch(() => {}); audioReset();
-  acc = 0; running = true; wakeLock();
+  acc = 0; rendererFailed = false; wakeLock();
   const xp = updateXpak();
   if (xp.kind >= 2 && xp.kind <= 3 && !xp.now) toast(`${name} ${xp.kind === 3 ? 'needs' : 'needs for some of its content'} the Expansion Pak, which is set to Removed in Settings`, 6000);
   else toast(`${name}${xp.now && xp.kind ? ' · Expansion Pak' : xp.kind === 4 && !xp.now ? ' · Expansion Pak left out' : ''}${useGpu ? '' : gpuStarting && settings.renderer !== 'sw' ? ' · software until WebGPU is ready' : ''}`, gpuStarting ? 4500 : 2200);
-  libAdd(data, fromLibrary);
+  await libAdd(data, fromLibrary, rom, romSize);
   pokeMenu();
 }
 
@@ -248,20 +315,32 @@ function idbOpen() {
 }
 async function idbGet(k) {
   const db = await idbOpen(); if (!db) return memStore.get(k);
-  return new Promise(res => { try { const r = db.transaction('kv').objectStore('kv').get(k); r.onsuccess = () => res(r.result); r.onerror = () => res(undefined); } catch (e) { res(undefined); } });
+  return new Promise((res, reject) => { try { const r = db.transaction('kv').objectStore('kv').get(k); r.onsuccess = () => res(r.result); r.onerror = () => reject(r.error || new Error('Could not read browser storage')); } catch (e) { reject(e); } });
 }
-async function idbSet(k, v) {
-  const db = await idbOpen(); if (!db) { memStore.set(k, v); return; }
-  return new Promise(res => { try { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = () => res(true); t.onerror = t.onabort = () => res(false); } catch (e) { res(false); } });
+let storageWarned = false;
+async function idbWrite(entries, deletes = []) {
+  const db = await idbOpen();
+  if (!db) {
+    for (const [k, v] of entries) memStore.set(k, v);
+    for (const k of deletes) memStore.delete(k);
+    if (!storageWarned) { storageWarned = true; toast('Temporary storage: saves last only until this page closes. Export your battery save.', 10000); }
+    return 'temporary';
+  }
+  return new Promise(res => {
+    try {
+      const t = db.transaction('kv', 'readwrite'), store = t.objectStore('kv');
+      t.oncomplete = () => res(true); t.onerror = t.onabort = () => res(false);
+      try { for (const [k, v] of entries) store.put(v, k); for (const k of deletes) store.delete(k); }
+      catch (e) { t.abort(); res(false); }
+    } catch (e) { res(false); }
+  });
 }
+function idbSet(k, v) { return idbWrite([[k, v]]); }
 async function idbHas(k) {
   const db = await idbOpen(); if (!db) return memStore.has(k);
   return new Promise(res => { try { const r = db.transaction('kv').objectStore('kv').count(k); r.onsuccess = () => res(r.result > 0); r.onerror = () => res(false); } catch (e) { res(false); } });
 }
-async function idbDel(k) {
-  const db = await idbOpen(); if (!db) { memStore.delete(k); return; }
-  return new Promise(res => { try { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').delete(k); t.oncomplete = () => res(true); t.onerror = t.onabort = () => res(false); } catch (e) { res(false); } });
-}
+function idbDel(k) { return idbWrite([], [k]); }
 const memStore = new Map();
 function saveBlob() {
   const m = u8v(), out = new Uint8Array(0x800 + 0x20000 + 0x20000);
@@ -269,30 +348,43 @@ function saveBlob() {
   return out;
 }
 function restoreSaveBlob(b) { const m = u8v(); m.set(b.subarray(0, 0x800), hi[12]); m.set(b.subarray(0x800, 0x20800), hi[13]); m.set(b.subarray(0x20800, 0x40800), hi[14]); }
-async function flushSaves() {
-  if (!ex || !rom) return;
-  const u = u32v();
-  if (!u[hi[16] >> 2]) return;
-  u[hi[16] >> 2] = 0;
-  await idbSet('save:' + rom.key, saveBlob().buffer);
+let savePending = null, saveRetryAt = 0;
+async function flushSaves(force = true) {
+  if (!force && Date.now() < saveRetryAt) return false;
+  if (savePending) { const ok = await savePending; if (!ok) return false; return flushSaves(); }
+  if (!ex || !rom) return true;
+  const generation = u32v()[hi[16] >> 2];
+  if (!generation) return true;
+  const r = rom, gen = romGen, bytes = saveBlob();
+  savePending = (async () => {
+    const outcome = await idbSet('save:' + r.key, bytes.buffer);
+    if (outcome === true && rom === r && romGen === gen && u32v()[hi[16] >> 2] === generation) u32v()[hi[16] >> 2] = 0;
+    if (outcome === false) { saveRetryAt = Date.now() + 5000; toast('Battery save failed. Progress is still in memory; retry or export it from Settings.', 6000); }
+    else saveRetryAt = 0;
+    return outcome !== false;
+  })();
+  try { return await savePending; } finally { savePending = null; }
 }
 
 // Save states: a compressed image of the core's static memory (everything except the ROM).
-async function gz(u8, dir) {
+async function gz(u8, dir, limit = MAX_ROM) {
   const s = new Blob([u8]).stream().pipeThrough(dir ? new CompressionStream('gzip') : new DecompressionStream('gzip'));
-  return new Uint8Array(await new Response(s).arrayBuffer());
+  return readBounded(s, limit);
 }
 const SLOTS = 4;
-const stateKey = slot => 'state:' + rom.key + (slot ? ':' + slot : '');
-async function stateMeta() {
-  const m = (rom && await idbGet('smeta:' + rom.key)) || [];
-  if (rom) for (let s = 0; s < SLOTS; s++) if (!m[s] && await idbGet(stateKey(s))) m[s] = { t: 0, thumb: '' };
+const stateKey = (slot, r = rom) => 'state:' + r.key + (slot ? ':' + slot : '');
+async function stateMeta(r = rom) {
+  const m = (r && await idbGet('smeta:' + r.key)) || [];
+  if (r) for (let s = 0; s < SLOTS; s++) if (!m[s] && await idbGet(stateKey(s, r))) m[s] = { t: 0, thumb: '' };
   return m;
 }
-async function saveState(slot = 0, thumb) {
+function saveState(slot = 0, thumb) {
+  const r = rom; return sessionOp(() => rom === r && saveStateNow(slot, thumb));
+}
+async function saveStateNow(slot = 0, thumb) {
   if (!rom || !self.CompressionStream) return toast('Save states are not supported in this browser');
-  const was = running; running = false;
   try {
+    if (rendererFailed) throw new Error('Renderer state is inconsistent');
     if (busy) await busy;
     if (thumb === undefined) thumb = await grabThumb();
     if (useGpu) await gpu.syncToCpu();
@@ -300,32 +392,36 @@ async function saveState(slot = 0, thumb) {
     const head = new Uint32Array([0x34365350, wasmHash, size, romSize]);
     const z = await gz(u8v().slice(0, size), true);
     const blob = new Uint8Array(16 + z.length); blob.set(new Uint8Array(head.buffer), 0); blob.set(z, 16);
-    await idbSet(stateKey(slot), blob.buffer);
-    const meta = await stateMeta(); meta[slot] = { t: Date.now(), thumb: thumb || '' }; await idbSet('smeta:' + rom.key, meta);
-    toast(`Saved to slot ${slot + 1}`);
-  } catch (e) { console.error(e); toast('Could not save state'); }
-  running = was; acc = 0;
+    const meta = await stateMeta(); meta[slot] = { t: Date.now(), thumb: thumb || '' };
+    const outcome = await idbWrite([[stateKey(slot), blob.buffer], ['smeta:' + rom.key, meta]]);
+    if (outcome === false) throw new Error('State transaction failed');
+    toast(outcome === true ? `Saved to slot ${slot + 1}` : `Slot ${slot + 1} saved temporarily — keep this page open`);
+    return true;
+  } catch (e) { console.error(e); toast('Could not save state'); return false; }
 }
-async function loadState(slot = 0) {
+function loadState(slot = 0) {
+  const r = rom; return sessionOp(() => rom === r && loadStateNow(slot)).catch(e => { console.error(e); toast('Could not load state'); return false; });
+}
+async function loadStateNow(slot = 0) {
   if (!rom || !self.DecompressionStream) return;
   const buf = await idbGet(stateKey(slot));
   if (!buf) return toast(`Slot ${slot + 1} is empty`);
+  if (!(buf instanceof ArrayBuffer) || buf.byteLength < 16 || buf.byteLength > MAX_ROM) return toast('That state is corrupt');
   const head = new Uint32Array(buf.slice(0, 16));
   if (head[0] !== 0x34365350 || head[1] !== wasmHash || head[2] !== ex.n64_state_size() || head[3] !== romSize) return toast('That state was made by a different version of Photon64');
-  const was = running; running = false;
   try {
     if (busy) await busy;
-    const raw = await gz(new Uint8Array(buf, 16), false);
+    const raw = await gz(new Uint8Array(buf, 16), false, head[2]);
     if (raw.length !== head[2]) throw new Error('size');
+    romGen++;
     u8v().set(raw, 0);
     ex.n64_set_rom(romPtr, romSize);
     ex.n64_config(1, +settings.cpi); ex.n64_config(5, +settings.pak); ex.n64_config(9, settings.vif ? 0 : 1);
     ex.n64_config(10, xpakMode()); updateXpak();           // (the restored machine keeps the memory it was saved with until it is reset)
     useGpu = false; ex.n64_config(0, 0); applyRenderer();
     audioReset();
-    toast(`Loaded slot ${slot + 1}`);
-  } catch (e) { console.error(e); toast('Could not load state'); }
-  running = was; acc = 0;
+    toast(`Loaded slot ${slot + 1}`); return true;
+  } catch (e) { console.error(e); toast('Could not load state'); return false; }
 }
 // A small picture of what is on screen now (for the library and the state slots).
 let thumbDark = false;
@@ -740,7 +836,7 @@ function emulate(drawLast, dropAudio) {
       try {
         do { if (gpu && useGpu) await gpu.syncNow(); else ex.n64_sync_done(); } while (gen === romGen && ex.n64_frame());
         if (gen === romGen) finishField(drawLast, dropAudio, t);
-      } catch (e) { console.error(e); }
+      } catch (e) { rendererFailure(e); }
     })();
     busy = p;
     p.then(() => { if (busy === p) busy = null; });
@@ -802,7 +898,7 @@ function tick(now) {
     if (useGpu && perf.stalls > 20 && perf.fps < hz * 0.8) { if (++perf.slow === 4) toast('The GPU is not keeping up — try the software renderer in Settings', 5000); } else if (perf.slow < 4) perf.slow = 0;
     perf.frames = 0; perf.emu = 0; perf.peak = 0; perf.stalls = 0; perf.t0 = now;
     if (padInfo && !$('stage').hidden) { const i = safeInsets(), j = padInfo.insets; if (i.some((v, k) => Math.abs(v - j[k]) > 0.5)) resize(); }   // safe area changed without a resize event
-    flushSaves();
+    flushSaves(false);
   }
 }
 function resize() {
@@ -818,7 +914,7 @@ function resize() {
   sw.style.left = (cw - dw) / 2 + 'px'; sw.style.top = (ch - dh) / 2 + 'px'; sw.style.width = dw + 'px'; sw.style.height = dh + 'px';
 }
 function togglePause(force) {
-  if (!rom) return;
+  if (!rom || rendererFailed) return;
   paused = force === undefined ? !paused : force;
   if (actx) { if (paused) actx.suspend().catch(() => {}); else actx.resume().catch(() => {}); }
   if (paused) flushSaves(); else { acc = 0; audioReset(); }
@@ -937,10 +1033,14 @@ async function openMenu() {
   const t = await grabThumb();
   if (t && rom === r) { menuThumb = t; $('m-thumb').src = t; if (settings.keep && !thumbDark) idbSet('thumb:' + r.key, t); }
 }
-async function resetGame() {
+function resetGame() { return sessionOp(resetGameNow); }
+async function resetGameNow() {
   if (!rom) return;
   if (busy) await busy;
-  ex.n64_reset(); if (useGpu) gpu.reset();
+  romGen++; ex.n64_reset();
+  if (gpuErr === 'device lost') { gpu = null; useGpu = false; ex.n64_config(0, 0); applyRenderer(); }
+  else if (useGpu) gpu.reset();
+  rendererFailed = false;
   updateXpak(); audioReset(); closeSheet(); togglePause(false); toast('Game reset');
 }
 function ago(t) {
@@ -955,7 +1055,9 @@ async function openStates(mode) {
   $('st-hint').textContent = (mode === 'save' ? 'Saving replaces what is in the slot.' : 'Loading replaces the game in progress.') + (isTouch ? '' : mode === 'save' ? ' F2 saves to slot 1 at any time.' : ' F4 loads slot 1 at any time.');
   const host = $('slots'); host.textContent = '';
   openSheet('states');
-  const meta = await stateMeta();
+  const r = rom;
+  let meta; try { meta = await stateMeta(r); } catch (e) { toast('Could not read state slots'); return; }
+  if (rom !== r) return;
   host.textContent = '';
   for (let i = 0; i < SLOTS; i++) {
     const m = meta[i], b = document.createElement('button');
@@ -964,8 +1066,8 @@ async function openStates(mode) {
     if (m && m.thumb) b.firstChild.style.backgroundImage = `url(${m.thumb})`; else b.firstChild.textContent = i + 1;
     b.children[1].textContent = `Slot ${i + 1}`; b.children[2].textContent = m ? ago(m.t) : 'Empty';
     b.onclick = async () => {
-      if (mode === 'save') { await saveState(i, menuThumb); closeSheet(); }
-      else { await loadState(i); closeSheet(); }
+      if (mode === 'save') { if (await saveState(i, menuThumb)) closeSheet(); }
+      else { if (await loadState(i)) closeSheet(); }
     };
     host.appendChild(b);
   }
@@ -973,21 +1075,18 @@ async function openStates(mode) {
 
 // ---- library: the games opened before, kept in this browser with a picture of where they were left
 async function libList() { return (await idbGet('lib')) || []; }
-async function libAdd(data, fromLibrary) {
+async function libAdd(data, fromLibrary, r = rom, size = romSize) {
   if (!settings.keep) return;
-  const r = rom, list = await libList();
-  const e = list.find(x => x.key === r.key) || { key: r.key, name: r.name, title: r.title, file: r.file, size: romSize };
+  const list = await libList();
+  const e = list.find(x => x.key === r.key) || { key: r.key, name: r.name, title: r.title, file: r.file, size };
   e.last = Date.now();
-  await idbSet('lib', [e, ...list.filter(x => x.key !== r.key)]);
-  if (fromLibrary || await idbHas('rom:' + r.key)) return;
-  if (await idbSet('rom:' + r.key, data.slice(0, romSize).buffer) === false) {      // no room: play on, just don't list it
-    await idbSet('lib', (await libList()).filter(x => x.key !== r.key));
-    toast('Not enough browser storage to keep this game in the library', 4000);
-  }
+  const entries = [['lib', [e, ...list.filter(x => x.key !== r.key)]]];
+  if (!fromLibrary && !await idbHas('rom:' + r.key)) entries.push(['rom:' + r.key, data.slice(0, size).buffer]);
+  if (await idbWrite(entries) === false) toast('Not enough browser storage to keep this game in the library', 4000);
 }
-async function libRemove(key) {
-  await idbSet('lib', (await libList()).filter(x => x.key !== key));
-  await idbDel('rom:' + key); await idbDel('thumb:' + key);
+function libRemove(key) { return sessionOp(() => libRemoveNow(key)); }
+async function libRemoveNow(key) {
+  if (await idbWrite([['lib', (await libList()).filter(x => x.key !== key)]], ['rom:' + key, 'thumb:' + key]) === false) return toast('Could not remove that game');
   renderLibrary();
 }
 async function libStart(e) {
@@ -1020,10 +1119,11 @@ async function renderLibrary() {
   add.onclick = () => $('file').click();
   host.appendChild(add);
 }
-async function goHome() {
-  running = false; romGen++;
+function goHome() { return sessionOp(goHomeNow).catch(e => toast(e.message, 6000)); }
+async function goHomeNow() {
   if (busy) await busy;
-  await flushSaves();
+  if (!await flushSaves()) throw new Error('Export your battery save before leaving this game.');
+  romGen++;
   if (actx) actx.suspend().catch(() => {});
   paused = false; ffLock = false; fastForward = false; resumeOnClose = false; menuThumb = '';
   $('sheet').hidden = true; $('stage').hidden = true; $('home').hidden = false;
@@ -1114,10 +1214,19 @@ function initUI() {
   };
   $('s-import').onclick = () => { if (!rom) return toast('Start a game first'); $('savefile').click(); };
   $('savefile').onchange = async e => {
-    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
-    const b = new Uint8Array(await f.arrayBuffer());
-    if (b.length !== 0x40800) return toast('Not a Photon64 save file');
-    restoreSaveBlob(b); await idbSet('save:' + rom.key, b.buffer); await resetGame(); toast('Save imported — game reset');
+    const f = e.target.files[0], r = rom; e.target.value = ''; if (!f) return;
+    try {
+      if (f.size !== 0x40800) throw new Error('Not a Photon64 save file');
+      const b = new Uint8Array(await f.arrayBuffer());
+      await sessionOp(async () => {
+        if (!r || rom !== r) throw new Error('The active game changed. Import the save again.');
+        if (b.length !== 0x40800) throw new Error('Not a Photon64 save file');
+        const outcome = await idbSet('save:' + r.key, b.buffer);
+        if (outcome === false) throw new Error('Could not import save');
+        restoreSaveBlob(b); await resetGameNow();
+        toast(outcome === true ? 'Save imported — game reset' : 'Save imported temporarily — export before closing');
+      });
+    } catch (err) { toast(err.message, 6000); }
   };
 
   for (const ev of ['pointermove', 'pointerdown']) addEventListener(ev, e => { if (e.pointerType === 'mouse') pokeMenu(); });
@@ -1145,6 +1254,6 @@ function initUI() {
   if (rom) { applyRenderer(); if (useGpu) toast('WebGPU renderer ready'); } else applyScale();
 })();
 // test hook
-window.__photon = { get ex() { return ex; }, get gpu() { return gpu; }, get hi() { return hi; }, get useGpu() { return useGpu; }, loadRom, perf, settings, gpuName, hostSample, hostFit, saveState, loadState, resetGame, openMenu, closeSheet, openSheet, libList,
+window.__photon = { get ex() { return ex; }, get gpu() { return gpu; }, get hi() { return hi; }, get useGpu() { return useGpu; }, loadRom, perf, settings, gpuName, hostSample, hostFit, saveState, loadState, flushSaves, resetGame, openMenu, closeSheet, openSheet, libList,
   get rom() { return rom; }, get busy() { return busy; }, setPaused: p => { paused = p; }, emulate, touchState, updateXpak,
   get pad() { return padInfo; }, setInsets: v => { insetOverride = v; resize(); } };

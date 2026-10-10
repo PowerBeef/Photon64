@@ -118,7 +118,7 @@ static void span_setup(const TriSetup *s, int y, u32 *out) {
   // attribute interpolation base
   s32 dy = y - (s->yh >> 2);
   s32 xhb = (s32)(s->xh + (s64)dy * (s64)(s32)((u32)s->dxhdy << 2));  // s64: the product can overflow 32 bits
-  if (s->flags & SETUP_DO_OFFSET) xhb += 3 * s->dxhdy;
+  if (s->flags & SETUP_DO_OFFSET) xhb = (s32)((s64)xhb + 3 * (s64)s->dxhdy);
   s32 base_x = xhb >> 15;
   s32 xfrac = (s->flags & SETUP_SKIP_XFRAC) ? 0 : ((xhb >> 7) & 0xFF);
 
@@ -136,9 +136,9 @@ static void span_setup(const TriSetup *s, int y, u32 *out) {
     s32 ys = y * 4 + i;
     int clip_y = ys < ylo || ys >= yhi;
     if (i == 4 && (!rdp_hd_mode || ys > yhi)) break;
-    s32 xh = s->xh + (ys - yh_base) * s->dxhdy;
-    s32 xm = s->xm + (ys - yh_base) * s->dxmdy;
-    s32 xl = s->xl + (ys - ym_base) * s->dxldy;
+    s32 xh = (s32)((s64)s->xh + (s64)(ys - yh_base) * s->dxhdy);  // truncate only after widened edge math
+    s32 xm = (s32)((s64)s->xm + (s64)(ys - yh_base) * s->dxmdy);  // truncate only after widened edge math
+    s32 xl = (s32)((s64)s->xl + (s64)(ys - ym_base) * s->dxldy);  // truncate only after widened edge math
     if (ys < s->ym) xl = xm;
     xl = sext(xl, 27); xh = sext(xh, 27);
     s32 xhs = (xh >> 12) | ((xh & 0xFFF) != 0);
@@ -165,10 +165,10 @@ static void span_setup(const TriSetup *s, int y, u32 *out) {
   int hd_valid = cons_r >= cons_l;
   if ((s->flags & SETUP_INTERLACE) && ((y & 1) != ((s->flags & SETUP_KEEP_ODD) ? 1 : 0))) valid = hd_valid = 0;
   s32 lodlength = flip ? (end_x - base_x) : (base_x - start_x);
-  out[0] = xleft[0] | (xleft[1] << 16);
-  out[1] = xleft[2] | (xleft[3] << 16);
-  out[2] = xright[0] | (xright[1] << 16);
-  out[3] = xright[2] | (xright[3] << 16);
+  out[0] = (u32)xleft[0] | ((u32)xleft[1] << 16);
+  out[1] = (u32)xleft[2] | ((u32)xleft[3] << 16);
+  out[2] = (u32)xright[0] | ((u32)xright[1] << 16);
+  out[3] = (u32)xright[2] | ((u32)xright[3] << 16);
   out[4] = (u32)start_x | ((u32)end_x << 16);
   out[5] = (u32)base_x;
   out[6] = (u32)xfrac | ((u32)(lodlength & 0xFFFF) << 16);

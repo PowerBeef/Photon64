@@ -1,0 +1,28 @@
+name: Core and frontend validation
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: tools/setup.sh
+      - run: npm run validate
+      - name: Compare shipped reference screenshots
+        run: .venv/bin/python tools/cmp_ref.py testroms 120
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-evidence
+          path: |
+            out/homebrew.json
+            out/photon64.html

@@ -1,3 +1,4 @@
+import { verdict } from './results.mjs';
 // Headless Chromium (SwiftShader WebGPU) harness: GPU renderer vs. the software reference, pixel for pixel.
 //   node tools/gputest.mjs rom frames "check,frames" [inputs] [--images prefix] [--noref] [--readback]
 import http from 'http'; import fs from 'fs'; import path from 'path'; import zlib from 'zlib'; import { fileURLToPath } from 'url';
@@ -32,7 +33,7 @@ function png(w, h, rgba) {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 const lvp = process.env.GPU_BACKEND === 'lvp';   // Mesa lavapipe instead of SwiftShader
-const browser = await chromium.launch({ env: lvp ? { ...process.env, VK_ICD_FILENAMES: '/usr/share/vulkan/icd.d/lvp_icd.json', VK_DRIVER_FILES: '/usr/share/vulkan/icd.d/lvp_icd.json' } : process.env,
+const browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, env: lvp ? { ...process.env, VK_ICD_FILENAMES: '/usr/share/vulkan/icd.d/lvp_icd.json', VK_DRIVER_FILES: '/usr/share/vulkan/icd.d/lvp_icd.json' } : process.env,
   args: [...(lvp ? ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-vulkan=native', '--use-angle=swiftshader', '--ignore-gpu-blocklist', '--disable-vulkan-surface', '--disable-gpu-sandbox', '--no-sandbox', '--disable-gpu-watchdog']
     : ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-vulkan=swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist', '--disable-vulkan-surface', '--enable-unsafe-swiftshader', '--disable-gpu-watchdog']),
     ...(process.env.CHROME_ARGS ? process.env.CHROME_ARGS.split(' ') : [])] });
@@ -51,7 +52,7 @@ if (listFile) {
     if (x.error || x.vi || (x.fb && x.fb.length) || !x.sync) bad++;
   }
   console.log(`ROMs: ${r.results.length}, with differences: ${bad}`, JSON.stringify(r.stats));
-  await browser.close(); server.close(); process.exit(0);
+  await browser.close(); server.close(); process.exit(bad || !r.results.length ? 1 : 0);
 }
 try { res = await page.evaluate(c => window.runTest(c), cfg); } catch (e) { console.log('ERROR', e.message); await browser.close(); server.close(); process.exit(1); }
 if (res.images) for (const im of res.images) {
@@ -61,5 +62,10 @@ if (res.images) for (const im of res.images) {
   fs.writeFileSync(`${images}_${String(im.frame).padStart(5, '0')}.png`, png(im.w, h, out));
 }
 delete res.images;
+res.coverage = { machineState: ['pc', 'rspInstructionCount', 'primitiveCount'], framebuffer: 'last batch target only', renderedCheckpoints: res.checks?.filter(c => c.prims > 0).length || 0 };
+res.expectedChecks = cfg.checks;
+res.verdict = verdict(res, cfg.checks, noref || noexact);
 console.log(JSON.stringify(res, null, 1));
 await browser.close(); server.close();
+
+process.exitCode = res.verdict.outcome === 'PASS' ? 0 : res.verdict.outcome === 'SKIP' ? 2 : 1;

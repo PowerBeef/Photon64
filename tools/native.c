@@ -8,17 +8,18 @@ void host_log(const char *msg, u32 a, u32 b) { printf("[log] %s %x %x\n", msg, a
 void host_gpu_flush(void) {}
 
 static u8 fb_rgba[640 * 576 * 4];
-static void dump_raw_fb(const char *path) {
-  u32 origin = sys.vi[1] & 0xFFFFFF, width = sys.vi[2] & 0xFFF, type = sys.vi[0] & 3;
-  if (!width) width = 320;
+static int dump_raw_fb(const char *path) {
+  u32 origin = sys.vi[1] & 0xFFFFFC, width = sys.vi[2] & 0xFFF, type = sys.vi[0] & 3;
+  if (!width || (type != 2 && type != 3)) return 0;
+  u32 dst_width = width < 640 ? width : 640;
   u32 h = width >= 640 ? 480 : 240;
-  for (u32 y = 0; y < h; y++) for (u32 x = 0; x < width && x < 640; x++) {
-    u8 *o = fb_rgba + (y * width + x) * 4;
+  for (u32 y = 0; y < h; y++) for (u32 x = 0; x < dst_width; x++) {
+    u8 *o = fb_rgba + (y * dst_width + x) * 4;
     if (type == 3) { u32 p = RDRAM32((origin + (y * width + x) * 4) & (RDRAM_MAX - 1)); o[0] = p >> 24; o[1] = p >> 16; o[2] = p >> 8; }
     else { u32 a = (origin + (y * width + x) * 2) & (RDRAM_MAX - 1); u16 p = *(u16 *)(rdram + (a ^ 2)); o[0] = ((p >> 11) & 31) << 3; o[1] = ((p >> 6) & 31) << 3; o[2] = ((p >> 1) & 31) << 3; }
     o[3] = 255;
   }
-  png_write(path, fb_rgba, width > 640 ? 640 : width, h);
+  return png_write(path, fb_rgba, dst_width, h);
 }
 static void dump_vi(const char *path) {
   // present at 640x480: line-double progressive output
@@ -102,7 +103,7 @@ int main(int argc, char **argv) {
     if (rdp_stat_prims != stall_lastp) { stall_lastp = rdp_stat_prims; stall_lastf = i; }
     if (wf) { while (wav_rd != audio_wr) { fwrite(&audio_buf[(wav_rd & (AUDIO_RING - 1)) * 2], 2, 2, wf); wav_rd++; wav_n++; } }
     if (prefix && !raw && i + 4 >= start) vi_render();
-    if (prefix && i >= start && (i % every) == every - 1) { char path[256]; snprintf(path, sizeof path, "%s%05d.png", prefix, i + 1); if (raw) dump_raw_fb(path); else dump_vi(path); }
+    if (prefix && i >= start && (i % every) == every - 1) { char path[256]; snprintf(path, sizeof path, "%s%05d.png", prefix, i + 1); if (raw) { if (!dump_raw_fb(path)) { fprintf(stderr, "raw output failed\n"); return 1; } } else dump_vi(path); }
   }
   double dt = (double)(clock() - t0) / CLOCKS_PER_SEC;
   if (wf) {
