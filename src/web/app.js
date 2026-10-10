@@ -1200,7 +1200,7 @@ function restoreDefaults() {
 function initUI() {
   const ic = (id, name) => { const el = $(id); (el.querySelector('i') || el).innerHTML = UiArt.icon(name); };
   // home
-  $('logo').innerHTML = UiArt.logo(40); $('emptyart').innerHTML = UiArt.emptyCart(116);
+  $('logo').innerHTML = UiArt.logo(); $('emptyart').innerHTML = UiArt.emptyCart(116);
   $('drop').innerHTML = UiArt.icon('plus') + 'Choose a ROM'; ic('h-set', 'gear');
   if (isTouch) document.body.classList.add('touchdev');
   const pick = () => $('file').click();

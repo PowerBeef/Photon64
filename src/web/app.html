@@ -45,10 +45,9 @@ svg { display: block; }
   background: radial-gradient(520px 300px at 0% 0%, rgba(34, 179, 92, .10), transparent 70%), radial-gradient(520px 300px at 100% 0%, rgba(59, 123, 255, .12), transparent 70%), var(--bg); }
 #home .wrap { max-width: 980px; margin: 0 auto; padding: calc(var(--st) + 14px) calc(var(--sr) + 18px) calc(var(--sb) + 28px) calc(var(--sl) + 18px); min-height: 100%; display: flex; flex-direction: column; }
 .top { display: flex; align-items: center; gap: 12px; }
-.brand { display: flex; align-items: center; gap: 11px; flex: 1; min-width: 0; font: 800 25px/1 var(--round); letter-spacing: -.01em; }
-.brand i { font-style: normal; color: var(--yellow); }
-.brand > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#logo { flex: none; }
+.brand { display: flex; align-items: center; flex: 1; min-width: 0; }
+#logo { display: block; width: 244px; max-width: 100%; }
+#logo svg { width: 100%; height: auto; }
 #home .stripe { margin: 14px 0 0; width: 76px; }
 #empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 28px 0 12px; gap: 6px; }
 #empty h2 { font: 800 23px var(--round); margin: 12px 0 0; }
@@ -234,7 +233,7 @@ h3 { font: 700 12px var(--round); text-transform: uppercase; letter-spacing: .08
 <div id="home">
   <div class="wrap">
     <div class="top">
-      <div class="brand"><span id="logo"></span><span>Photon<i>64</i></span></div>
+      <div class="brand"><span id="logo" role="img" aria-label="Photon64"></span></div>
       <button class="ibtn" id="h-set" title="Settings" aria-label="Settings"></button>
     </div>
     <div class="stripe"></div>

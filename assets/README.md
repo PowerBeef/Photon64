@@ -1,30 +1,56 @@
 # Photon64 identity
 
-The light-aperture mark uses four console-inspired colors around a transparent
-spark. The wordmark is original vector geometry, including the forward-leaning
-blue `64`. There are no embedded images, font files, external resources, or
-scripts in these SVGs.
+A cyan light-beam **P** and custom geometric **PHOTON64** lettering replace the
+four-color aperture and monoline wordmark. The lettering is drawn as filled
+paths, including its counters and optical spacing. It is a custom wordmark,
+not a general-purpose alphabet or an installable font.
 
 | Asset | Use | Bytes |
 |---|---|---:|
-| [logo-mark.svg](logo-mark.svg) | Compact icon; transparent background | 417 |
-| [logo.svg](logo.svg) | Full wordmark; dark lettering for light backgrounds | 1,111 |
-| [logo-on-dark.svg](logo-on-dark.svg) | Full wordmark; light lettering for dark backgrounds | 1,127 |
-| [banner.svg](banner.svg) | Project README header | 1,691 |
+| [logo-mark.svg](logo-mark.svg) | Cyan symbol, transparent background | 1,298 |
+| [logo-mark-mono.svg](logo-mark-mono.svg) | Single-color symbol using `currentColor` | 1,303 |
+| [logo.svg](logo.svg) | Full lockup for light backgrounds | 5,767 |
+| [logo-on-dark.svg](logo-on-dark.svg) | Full lockup for dark backgrounds | 5,783 |
+| [wordmark.svg](wordmark.svg) | Lettering alone for light backgrounds | 4,659 |
+| [wordmark-on-dark.svg](wordmark-on-dark.svg) | Lettering alone for dark backgrounds | 4,675 |
+| [banner.svg](banner.svg) | Project README header | 6,165 |
 
-The logo files use only paths and groups. Lettering uses `currentColor`, so an
-inline logo can inherit the application's text color. The dark-background
-variant sets an explicit light color for use as an external image. The banner's
-subtitle uses a system sans-serif fallback, without loading a font.
+Every logo is a real vector: no embedded bitmap, font, script, external URL or
+filter. Logo lettering uses `currentColor`; external light variants default to
+black, and dark variants explicitly use `#f3f6fa`. The accent is `#00d9de`.
+The banner's explanatory subtitle uses system sans-serif; the brand name is
+entirely paths. Preserve each `viewBox` and scale uniformly.
 
-To use the mark or wordmark in the self-contained app, inline the SVG directly
-in the HTML template or the existing JavaScript artwork helpers. A separate
-image URL would make the app depend on another file. Preserve the `viewBox` and
-give the inline SVG a CSS width or height; it will scale without raster assets.
+## Image generation and faithful conversion
 
-Edit these SVGs as the source artwork. Keep the aperture transparent, the four
-segments separate, and the aspect ratio intact. The previous PNG banner and its
-platform-specific raster generator have been replaced by `banner.svg`.
+The built-in image-generation tool designed both the symbol and lettering.
+[The refined source master](design/photon64-master.png) and [prompt notes](design/prompt.md)
+are retained for reproducibility. The first transparency pass had distressed
+edge artifacts; the second generation produced the clean opaque master used
+for tracing. No font was substituted during conversion.
 
-This asset update changes the project page only; the emulator's existing UI
-artwork is not replaced automatically.
+Two flat-color masks remove the background and discard isolated raster specks
+below 50 source pixels. Potrace fits cubic Bezier paths and preserves sharp
+corners and letter counters. Colors are normalized to the requested flat fills.
+Rasterizing the resulting SVG at the original 2172×724 resolution gives cyan
+silhouette IoU **99.767%** and lettering IoU **99.577%**, with maximum boundary
+distances of **1.414px** and **2px** respectively. These are geometric comparisons
+to the cleaned masks, not a claim of pixel-identical gradients or antialiasing.
+[vectorization.json](design/vectorization.json) records parameters, source hash,
+measurements and file sizes.
+
+Rebuild the assets with optional design dependencies:
+
+```sh
+.venv/bin/python -m pip install -r tools/brand-requirements.txt
+.venv/bin/python tools/vectorize-brand.py
+```
+
+The application build reads `logo-on-dark.svg` and embeds its paths once in the
+self-contained HTML. `UiArt.logo()` supplies the responsive home header; its
+accessible name is Photon64. Neither the raster master nor design dependencies
+are included in the HTML or required for normal setup/build. There are no
+network font requests. General menu text retains the readable system font.
+
+Changing `.github/release.json` publishes a new version; updating these assets
+alone does not replace an existing release.

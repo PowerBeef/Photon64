@@ -1,0 +1,27 @@
+{
+  "source_sha256": "63bec565757152f24a69d1c90b572085fa04849a0d19d667a548d62b69de7ede",
+  "source_pixels": [
+    2172,
+    724
+  ],
+  "method": "Two flat-color masks; isolated components below 50px discarded; Potrace cubic Bezier fitting; alphamax 0.7; 0.2px optimization tolerance; 0.1px coordinate precision.",
+  "metrics": {
+    "cyan": {
+      "silhouette_iou": 0.99767,
+      "max_edge_distance_source_pixels": 1.414
+    },
+    "lettering": {
+      "silhouette_iou": 0.995771,
+      "max_edge_distance_source_pixels": 2.0
+    }
+  },
+  "svg_bytes": {
+    "banner.svg": 6165,
+    "logo-mark-mono.svg": 1303,
+    "logo-mark.svg": 1298,
+    "logo-on-dark.svg": 5783,
+    "logo.svg": 5767,
+    "wordmark-on-dark.svg": 4675,
+    "wordmark.svg": 4659
+  }
+}

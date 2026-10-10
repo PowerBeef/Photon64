@@ -23,6 +23,7 @@ const js = `(() => {
 'use strict';
 const WASM_B64 = "${wasm}";
 const SHADERS = ${JSON.stringify(shaders)};
+const BRAND_SVG = ${JSON.stringify(rd('assets/logo-on-dark.svg').trim().replace('role="img" aria-label="Photon64"', 'aria-hidden="true" focusable="false"'))};
 ${rd('src/web/gpu.js')}
 ${rd('src/web/pad.js')}
 ${rd('src/web/art.js')}

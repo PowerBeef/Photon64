@@ -27,16 +27,8 @@ const UiArt = (() => {
   };
   const icon = name => line(ICONS[name] || '');
 
-  // The mark: a game cartridge whose label is four fields of colour around a spark of light.
-  const cart = (w, inner, extra = '') => `<svg viewBox="0 0 48 48" width="${w}" height="${w}" aria-hidden="true" focusable="false">
-    <defs><linearGradient id="ua-shell" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#70767f"/><stop offset="1" stop-color="#3a3e46"/></linearGradient></defs>
-    <path d="M9 5h30a4 4 0 0 1 4 4v23l-3.2 3.2V43H8.2v-7.8L5 32V9a4 4 0 0 1 4-4z" fill="url(#ua-shell)" stroke="#9aa0aa" stroke-opacity=".55" stroke-width="1"/>
-    <path d="M12 38h3v5h-3zM17.2 38h3v5h-3zM27.8 38h3v5h-3zM33 38h3v5h-3z" fill="#22252b"/>${inner}${extra}</svg>`;
-  const label = `<g><clipPath id="ua-label"><rect x="10" y="9.5" width="28" height="20" rx="3"/></clipPath><g clip-path="url(#ua-label)">
-      <rect x="10" y="9.5" width="14" height="10" fill="${C.green}"/><rect x="24" y="9.5" width="14" height="10" fill="${C.blue}"/>
-      <rect x="10" y="19.5" width="14" height="10" fill="${C.red}"/><rect x="24" y="19.5" width="14" height="10" fill="${C.yellow}"/></g>
-      <path d="M24 12.2c.7 4 2 5.6 6.6 7.3-4.6 1.7-5.9 3.3-6.6 7.3-.7-4-2-5.6-6.6-7.3 4.6-1.7 5.9-3.3 6.6-7.3z" fill="#fff"/></g>`;
-  const logo = (w = 40) => cart(w, label);
+  // The generated identity is bundled from assets/logo-on-dark.svg as paths.
+  const logo = (w = 244) => BRAND_SVG.replace('<svg ', `<svg width="${w}" `);
   // empty library: the cartridge as an outline, waiting for a game
   const emptyCart = (w = 120) => `<svg viewBox="0 0 48 48" width="${w}" height="${w}" aria-hidden="true" focusable="false">
     <path d="M9 5h30a4 4 0 0 1 4 4v23l-3.2 3.2V43H8.2v-7.8L5 32V9a4 4 0 0 1 4-4z" fill="#1d2027" stroke="#5a606c" stroke-width="1.2" stroke-dasharray="3 2.4"/>

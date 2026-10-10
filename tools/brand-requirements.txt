@@ -1,0 +1,4 @@
+# Optional design tools; not installed by emulator setup or needed to build.
+-r requirements.txt
+potracer==0.0.4
+CairoSVG==2.9.1

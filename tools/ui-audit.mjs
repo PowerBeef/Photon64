@@ -18,6 +18,18 @@ export async function auditUi() {
   for (const e of [root, ...root.querySelectorAll('.pg, .pg-b, .tabs, .seg, #lib, #binds')].filter(visible)) {
     if (e.scrollWidth > e.clientWidth + epsilon) errors.push(name(e) + ' overflows horizontally');
   }
+  const brand = document.getElementById('logo');
+  if (!open && visible(brand)) {
+    const svg = brand.querySelector('svg'), r = rect(brand), settings = rect(document.getElementById('h-set'));
+    if (!svg) errors.push('Brand artwork is missing');
+    else {
+      const b = rect(svg), v = svg.viewBox.baseVal;
+      if (b.height < 28 || b.right > settings.x - 4 || b.x < safe[3] - epsilon || b.y < safe[0] - epsilon) errors.push('Brand is too small or overlaps the header/safe area');
+      if (Math.abs(b.width / b.height - v.width / v.height) > .02) errors.push('Brand artwork is stretched');
+      if (b.right > r.right + epsilon || b.bottom > r.bottom + epsilon) errors.push('Brand artwork exceeds its container');
+    }
+    if (brand.getAttribute('role') !== 'img' || brand.getAttribute('aria-label') !== 'Photon64') errors.push('Brand has no accessible name');
+  }
   const controls = [...root.querySelectorAll('button, input, summary, [role="button"]')].filter(visible);
   for (const e of controls) {
     e.scrollIntoView({ block: 'nearest', inline: 'nearest' });
