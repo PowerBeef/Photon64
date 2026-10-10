@@ -34,7 +34,7 @@ npm run test:roms
 node tools/romcheck.mjs roms --frames 1200 --output out/commercial-1200.json
 ```
 
-The manifest records source revision/dirty state, WASM SHA256, runtime, ROM identities, frames, statistics and two-run memory/audio hashes. PASS here means deterministic software execution only. `tools/run_wasm.mjs` remains a diagnostic timing utility. Recorded input scripts exist for Mario, GoldenEye, Perfect Dark and Mario Kart; Smash and World Driver currently have smoke coverage only.
+The manifest records source revision/dirty state, WASM SHA256, runtime, ROM identities, frames, statistics and two-run memory/audio hashes. PASS here means deterministic software execution only. `tools/run_wasm.mjs` remains a diagnostic timing utility. Recorded input scripts exist for all six local games; see `tools/games.sh` for their lengths and checkpoints and `VALIDATION_REPORT.md` for executed results.
 
 CI automatically executes the baseline and shipped screenshot-reference gate on push/PR. An independent browser job installs Chromium and runs persistence/lifecycle checks with a shipped homebrew fixture, without commercial ROMs. Any existing reference discrepancy intentionally makes the workflow fail. Repository branch-protection settings are managed separately; adding a workflow does not enforce required checks in settings.
 
@@ -77,7 +77,7 @@ npm run bench -- "roms/Super Mario 64 (USA).z64" \
   --repeats 3 --output out/playtest-sm64
 ```
 
-Use `--frames 3300 --warmup 2800 --inputs tools/inputs/mk64.txt` for Mario Kart, `4600/4000/ge.txt` for GoldenEye, and `6500/5700/pd.txt` for Perfect Dark. These scripts replay a bounded scenario; they do not establish whole-game compatibility. Missing scripts for Smash and World Driver remain a coverage gap.
+Use `--frames 3300 --warmup 2800 --inputs tools/inputs/mk64.txt` for Mario Kart, `4600/4000/ge.txt` for GoldenEye, and `6500/5700/pd.txt` for Perfect Dark. Smash has `tools/inputs/smash.txt` through an 8000-field match segment; World Driver has `tools/inputs/wdc.txt` with menu and race navigation. These scripts replay bounded scenarios; they do not establish whole-game compatibility.
 
 The original Mario script finishes at the castle tutorial dialog. `tools/inputs/sm64-play.txt` extends it with the observed dialog dismissal, run and jump. Use `--frames 4488 --warmup 4298 --inputs tools/inputs/sm64-play.txt` to measure that short active movement segment rather than the tutorial scene.
 

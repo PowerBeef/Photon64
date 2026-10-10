@@ -21,14 +21,14 @@ fi
 runner=dawntest.mjs; [ "$GPU_RUNNER" = browser ] && runner=gputest.mjs
 PY=${PY:-python3}
 [ -x .venv/bin/python ] && PY=.venv/bin/python   # project venv first (Pillow/scipy live there)
-frames_for() { case $1 in sm64) echo 4200;; ge) echo 4600;; pd) echo 6500;; mk64) echo 3300;; smash) echo 8000;; wdc) echo 14000;; esac; }
+frames_for() { case $1 in sm64) echo 4200;; ge) echo 4600;; pd) echo 6500;; mk64) echo 3300;; smash) echo 8000;; wdc) echo 16762;; esac; }
 checks_for() { case $1 in
   sm64) echo "250,900,2000,2600,3780,4190";;
   ge) echo "700,1300,2500,2900,3450,4000,4599";;
   pd) echo "700,1400,2650,3500,4800,5140,5400,5700,6100,6499";;
   mk64) echo "500,700,1300,1700,2100,2500,2800,3299";;
   smash) echo "300,6000,6151,6755,7114,7999";;
-  wdc) echo "300,6000,7418,7906,10441,13999";; esac; }
+  wdc) echo "300,6000,7418,7906,10441,13999,15541,15941,16401,16761";; esac; }
 rom_for() {  # short name -> usable path; a root copy wins over roms/
   if [ -f "$1.z64" ]; then echo "$1.z64"; return 0; fi
   case $1 in

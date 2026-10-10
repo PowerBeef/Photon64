@@ -1,6 +1,6 @@
 # Photon64 implementation plan
 
-Source: `ab28c09f4b059239c6467cabbe683701cc86ce4b`, matching the attached 9 October audit. Work follows the repository's main-only policy. Priorities are grounded in executable source, not the report's severity labels alone.
+Initial source: `ab28c09f4b059239c6467cabbe683701cc86ce4b`, matching the attached 9 October audit. Status incorporates the five-area implementation published at `8146e70` and its hosted browser follow-up at `b2d0455`. Work follows the repository's main-only policy. Priorities are grounded in executable source and measured results.
 
 | Stage | Work | Acceptance | Status |
 |---|---|---|---|
@@ -10,7 +10,7 @@ Source: `ab28c09f4b059239c6467cabbe683701cc86ce4b`, matching the attached 9 Octo
 | 1: Native safety | F04 and JoyBus follow-up: bounded output pitch, explicit format checks, aligned guest source, zero-length command rejection | ASan/UBSan width/format boundaries; no adjacent command dispatch | Implemented; native regressions |
 | 2: Defined integer operations | F05: unsigned CPU wrap/shifts, branch displacement multiplication, widened RDP edges and unsigned packed spans | Same exact semantic vectors in native sanitizers and O0/O3 WASM | Implemented for reproduced cases |
 | 2: Exception semantics | F07: masked bus stores with write translation and original virtual fault address | Missing/invalid/read-only mappings, all alignments, delay-slot EPC/BD | Implemented; independent byte expectations |
-| 2: FPU | F06: distinguish infinite inputs from finite overflow; then bit-exact arithmetic and rounding oracle | Infinity vectors pass native/WASM; all four rounding modes, NaNs/subnormals/conversions/traps require differential corpus | Infinity classification implemented; directed rounding and full conformance remain open |
+| 2: FPU | F06: portable bit-exact arithmetic, directed rounding and exception wrapper | Exact rational/isqrt vectors for four rounding modes, NaNs/subnormals/conversions/traps in native/WASM | Implemented with SoftFloat 3e and 3628 independent vectors; broader hardware conformance remains open |
 | 2: GPU coherence | F08/F09: rejected mappings/submissions cannot acknowledge; cleanup and reset generations; full chunked range scans; fail-stop device loss | Injected map/submit failures, old callbacks, capacity tails; actual backend integration | Implemented; fake-device tests and available adapter probes |
 | 2: Bounded imports | F10: size checks before file reads; counted, cancelable ZIP/gzip decoding; local/central records and CRC | Oversized file never read; over-budget stream canceled; malformed/CRC inputs rejected | Implemented; focused tests; extended fuzz corpus pending |
 | 3: Repeatable development | F11/F12: pinned SDK digest and oracle revision, portable native build, Node/npm/Python versions, validation script and CI | Rebuild with documented commands; required lanes fail when unavailable; record fixture/artifact hashes | Implemented; local and hosted baseline/browser evidence recorded; reference-image gate remains failing |
@@ -26,14 +26,14 @@ Source: `ab28c09f4b059239c6467cabbe683701cc86ce4b`, matching the attached 9 Octo
 - GPU loss pauses the session and explains reset/reopen; switching to software cannot recover GPU-only bytes. Battery export remains available. No transparent checkpoint recovery is claimed.
 - Reference screenshot checks are coarse content checks with fixed 4% green, 6% red/text tolerances and a 20-pixel floor. They are not a pixel-accuracy oracle. Existing mismatches must remain visible.
 - CPU memory accesses and PCs remain 32-bit, CACHE remains a no-op, and timing remains configurable constant CPI. No broad accuracy claim is introduced.
-- Full FPU directed rounding is a separate implementation milestone. Host fenv alone does not solve WASM arithmetic. Choose and pin a bit-exact oracle before optimizing that path.
+- Guest FPU rounding now uses pinned SoftFloat 3e, with independent exact-rational/isqrt expected results. Finite vector coverage does not certify every VR4300 hardware behavior.
 
 ## Next implementation order
 
 1. Investigate actual Angrylion and shipped-reference differences by first failing command/frame; preserve zero-tolerance verdicts and fix source semantics, not expected results.
-2. Pin a trusted software FP oracle and establish the report's half-ULP vectors as expected failures in a separate conformance lane. Implement rounding/exception rules with exact bits and flags across native/WASM.
-3. Extend browser tests for durable reload, write failure UI/export, load/home/state permutations, device loss, and allocation failure. Validate at least one physical adapter and mobile browser before claiming support.
-4. Add recorded-input coverage for Smash and World Driver Championship, then profile frame pacing, long tasks, audio underruns, readback costs and memory by scale. Consider workers only after evidence identifies UI-thread stalls.
+2. Extend the passing FPU corpus with hardware-derived VR4300 vectors, especially trap/NaN/flush corner cases beyond the independently generated corpus.
+3. Extend passing desktop/mobile-emulated failure tests to allocation failure and more load/home/state permutations. Validate a physical adapter and real mobile browser before claiming device support.
+4. Extend the six recorded gameplay scenarios and profile frame pacing, long tasks, audio underruns, readback costs and memory by scale. Consider workers only after evidence identifies UI-thread stalls.
 
 ## Single-pass follow-up
 
@@ -41,4 +41,4 @@ Source: `ab28c09f4b059239c6467cabbe683701cc86ce4b`, matching the attached 9 Octo
 2. FPU: portable SoftFloat f32/f64 arithmetic and conversions, all four guest rounding modes, VR4300 legacy NaN/flush/trap policy. Validate against independently generated Fraction/isqrt vectors in native sanitizer and WASM O0/O3 builds. Hardware certification remains separate.
 3. Browser: stop on synchronous presentation errors, release held keyboard/touch input on focus/page loss, suppress hidden-page fields, reject synchronization/reset on lost devices. Hosted desktop/mobile-emulated fault injection covers quota/unavailable storage and presentation recovery; real Dawn destruction covers the device callback.
 4. Games: add Smash match and World Driver Quick Race scripts; extend every local lane to recorded checkpoints and preserve failures. ROM payloads stay local. A scripted segment is not whole-game compatibility.
-5. Performance: conservative wrapped source/target overlap permits larger software batches; Evaluate VI SIMD candidates against scalar images and timing; retain only demonstrated improvements. Compare fixed artifacts, final machine/image/audio hashes and named profiles; shared-host wall time requires qualification.
+5. Performance: conservative wrapped source/target overlap permits larger software batches. VI SIMD candidates matched images but were rejected for inconsistent timing benefits. Compare fixed artifacts, final machine/image/audio hashes and named profiles; shared-host wall time requires qualification.
