@@ -127,7 +127,8 @@ try {
   assert.match(await temporaryPage.locator('#toast').textContent(), /temporarily/i);
   await temporaryPage.screenshot({ path: path.join(evidence, 'temporary-storage.png') });
   await temporaryPage.reload(); await temporaryPage.waitForFunction(() => window.__photon?.ex);
-  assert.equal(await temporaryPage.locator('#lib .cart').count(), 0);
+  assert.deepEqual(await temporaryPage.evaluate(() => window.__photon.libList()), []);
+  assert.equal(await temporaryPage.locator('#lib .cart:not(.add)').count(), 0);
   await temporary.close();
   report.checks.push('unavailable storage stays dirty, labels temporary states, and disappears after reload');
   assert.deepEqual(errors, []);
