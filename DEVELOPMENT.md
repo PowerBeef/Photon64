@@ -72,6 +72,10 @@ CI automatically executes the baseline, exact raw fixtures and independent VI fi
 
 See `IMPLEMENTATION_PLAN.md` for remaining FPU, renderer/reference, browser lifecycle and device-matrix work. See `THIRD_PARTY.md` for fixture and reference provenance.
 
+## Publishing a release
+
+Update `.github/release.json` on `main` with a new tag, an exact source SHA, its completed successful `validate.yml` push run ID, and the prerelease flag. Add `releases/<tag>.md` with release notes. The release workflow runs when the manifest changes, or through manual dispatch. It verifies that the source passed all validation jobs, downloads that run's tested HTML artifact without rebuilding, and publishes it with SHA256 checksums, build provenance and license notes. Existing published releases are left unchanged; a conflicting tag or incomplete draft requires inspection before retrying. The release tag points to the validated source commit, while the manifest/notes commit records the publishing operation.
+
 ## This execution environment
 
 The installed SDK and extracted lavapipe driver are under `.tools/`; the checked package identities are in `out/host-provenance.json`. Use `VK_ICD_FILENAMES="$PWD/.tools/lvp_icd.json"` for the local Dawn lane. `tools/setup.sh` itself was successfully exercised with npm and the pinned Python requirements.

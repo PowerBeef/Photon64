@@ -1,0 +1,120 @@
+name: Publish validated release
+on:
+  push:
+    branches: [main]
+    paths: ['.github/release.json', '.github/workflows/release.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: photon64-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify the exact source revision passed the full matrix
+        id: release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const config = JSON.parse(fs.readFileSync('.github/release.json', 'utf8'));
+            const {tag, target_sha: sha, validation_run_id: run_id, prerelease} = config;
+            if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag) ||
+                !/^[0-9a-f]{40}$/.test(sha) || !Number.isSafeInteger(run_id) || run_id <= 0 ||
+                typeof prerelease !== 'boolean' || !fs.existsSync(`releases/${tag}.md`))
+              throw new Error('Invalid release manifest or missing notes');
+            const repo = context.repo;
+            const {data: run} = await github.rest.actions.getWorkflowRun({...repo, run_id});
+            if (run.status !== 'completed' || run.conclusion !== 'success' ||
+                run.event !== 'push' || run.head_branch !== 'main' || run.head_sha !== sha ||
+                run.path !== '.github/workflows/validate.yml' ||
+                run.head_repository?.full_name !== `${repo.owner}/${repo.repo}`)
+              throw new Error('Release source does not have a successful main validation run');
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
+              {...repo, run_id, filter: 'latest', per_page: 100});
+            if (jobs.length < 8 || jobs.some(j => j.conclusion !== 'success') ||
+                !jobs.some(j => j.name === 'baseline') || !jobs.some(j => j.name === 'safari'))
+              throw new Error('Required validation jobs did not all pass');
+            // Existing releases are immutable. Re-running a completed publish is harmless.
+            try {
+              const {data: ref} = await github.rest.git.getRef({...repo, ref: `tags/${tag}`});
+              if (ref.object.type !== 'commit' || ref.object.sha !== sha)
+                throw new Error('Existing tag differs from the validated source');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            let exists = false;
+            try {
+              const {data: release} = await github.rest.repos.getReleaseByTag({...repo, tag});
+              const {data: ref} = await github.rest.git.getRef({...repo, ref: `tags/${tag}`});
+              if (release.draft || ref.object.type !== 'commit' || ref.object.sha !== sha)
+                throw new Error('Existing draft or tag differs; inspect before retrying');
+              exists = true;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            for (const [key, value] of Object.entries({tag, sha, run_id, prerelease, exists}))
+              core.setOutput(key, String(value));
+      - name: Download the artifact tested by that exact validation run
+        if: steps.release.outputs.exists != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: validation-evidence
+          path: tested
+          run-id: ${{ steps.release.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Package the self-contained app and provenance
+        if: steps.release.outputs.exists != 'true'
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          SOURCE_SHA: ${{ steps.release.outputs.sha }}
+          VALIDATION_RUN: ${{ steps.release.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+          test -s tested/photon64.html
+          cp tested/photon64.html release-assets/photon64.html
+          cp LICENSE release-assets/LICENSE.txt
+          cp THIRD_PARTY.md release-assets/THIRD_PARTY.md
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          directory = pathlib.Path('release-assets')
+          files = sorted(directory.iterdir())
+          metadata = {
+              'tag': os.environ['RELEASE_TAG'],
+              'source_sha': os.environ['SOURCE_SHA'],
+              'validation_run': f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['VALIDATION_RUN']}",
+              'files': {p.name: {'sha256': hashlib.sha256(p.read_bytes()).hexdigest(), 'bytes': p.stat().st_size} for p in files},
+          }
+          (directory / 'build-info.json').write_text(json.dumps(metadata, indent=2) + '\n')
+          files = sorted(directory.iterdir())
+          (directory / 'SHA256SUMS').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in files))
+          PY
+          (cd release-assets && sha256sum --check SHA256SUMS)
+      - name: Create the draft with assets, then publish
+        if: steps.release.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          SOURCE_SHA: ${{ steps.release.outputs.sha }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          flags=()
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" release-assets/* --target "$SOURCE_SHA" \
+            --title "Photon64 $RELEASE_TAG" --notes-file "releases/$RELEASE_TAG.md" \
+            --draft "${flags[@]}"
+          gh release edit "$RELEASE_TAG" --draft=false
+          gh release view "$RELEASE_TAG" --json url,tagName,isDraft,isPrerelease,assets

@@ -38,6 +38,8 @@ Open the app, add a cartridge dump, and return to it from your game library. No 
 
 ### Get the app
 
+**Download a release:** open [Releases](https://github.com/PowerBeef/Photon64/releases), select the newest preview or release, and download **photon64.html**. Open that file to start. Each release includes checksums and the exact source revision and validation run.
+
 **Use a CI build:** open the [validation runs](https://github.com/PowerBeef/Photon64/actions/workflows/validate.yml), choose a successful run for `main`, and download its **validation-evidence** artifact. Extract it and open `photon64.html`. GitHub may require you to sign in to download artifacts.
 
 **Build your own:** follow [Building from source](#building-from-source) below. The output is `out/photon64.html`.
