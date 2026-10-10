@@ -90,13 +90,19 @@ jobs:
           git show "$SOURCE_SHA:third_party/softfloat/COPYING.txt" > release-assets/SoftFloat-LICENSE.txt
           git show "$SOURCE_SHA:third_party/ares/LICENSE.txt" > release-assets/ares-LICENSE.txt
           python3 - <<'PY'
-          import hashlib, json, os, pathlib
+          import base64, hashlib, json, os, pathlib, re
           directory = pathlib.Path('release-assets')
           tested = json.loads((directory / 'tested-build-info.json').read_text())
           if tested['source_sha'] != os.environ['SOURCE_SHA']:
               raise SystemExit('Tested build source differs')
+          if tested.get('dirty') is not False:
+              raise SystemExit('Tested build has uncommitted source changes')
           if tested['html_sha256'] != hashlib.sha256((directory / 'photon64.html').read_bytes()).hexdigest():
               raise SystemExit('Tested HTML digest differs')
+          wasm_digest = hashlib.sha256(pathlib.Path('tested/n64.wasm').read_bytes()).hexdigest()
+          embedded = re.search(r'const WASM_B64 = "([A-Za-z0-9+/=]+)";', (directory / 'photon64.html').read_text())
+          if not embedded or tested['wasm_sha256'] != wasm_digest or hashlib.sha256(base64.b64decode(embedded.group(1), validate=True)).hexdigest() != wasm_digest:
+              raise SystemExit('Tested and embedded WASM digests differ')
           files = sorted(directory.iterdir())
           metadata = {
               'tag': os.environ['RELEASE_TAG'],

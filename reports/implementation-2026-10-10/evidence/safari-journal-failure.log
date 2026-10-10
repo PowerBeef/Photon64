@@ -1,0 +1,11 @@
+﻿2026-10-10T21:00:41.5949870Z Current runner version: '2.337.0'
+2026-10-10T21:00:41.5975340Z macOS
+2026-10-10T21:00:41.5975690Z 15.7.9
+2026-10-10T21:01:05.2060260Z Safari failure state: {"events":null,"errors":null,"rom":null,"toast":null,"fileValue":null,"files":[],"running":null}
+2026-10-10T21:01:06.2062610Z TypeError: body?.script?.slice is not a function
+2026-10-10T21:01:06.2232660Z     at command (file:///Users/runner/work/Photon64/Photon64/tools/safaricheck.mjs:27:65)
+2026-10-10T21:01:06.2445670Z     at cmd (file:///Users/runner/work/Photon64/Photon64/tools/safaricheck.mjs:36:41)
+2026-10-10T21:01:06.2575920Z     at file:///Users/runner/work/Photon64/Photon64/tools/safaricheck.mjs:74:9
+2026-10-10T21:01:06.3117790Z Node.js v24.20.0
+2026-10-10T21:01:06.7069140Z ##[error]Process completed with exit code 1.
+2026-10-10T21:01:14.1824130Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@11d5960a326750d5838078e36cf38b85af677262, actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093, actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020, actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

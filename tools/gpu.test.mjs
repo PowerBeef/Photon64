@@ -88,3 +88,16 @@ test('partially built scale set is destroyed after pipeline rejection', async ()
   g.device.createComputePipelineAsync = async d => { if (d.compute.entryPoint === 'ordered_main') throw new Error('pipeline failed'); return {}; };
   await assert.rejects(g.buildSet(true, 1), /pipeline failed/); assert.equal(allocated, 4); assert.equal(destroyed, 4);
 });
+
+test('upload validation cannot be swallowed by an outer scale-build scope', async () => {
+  const {g,calls}=gpu();let depth=1;
+  g.device.pushErrorScope=()=>{depth++};
+  g.device.popErrorScope=()=>{assert.equal(depth--,2);return Promise.resolve({message:'invalid upload'})};
+  g.writeBuffer({},0,new Uint32Array(1));await assert.rejects(g.syncNow(),/invalid upload/);
+  assert.equal(depth,1);assert.equal(calls.done,0);assert.equal(g.firstError.phase,'upload');
+});
+test('completed validation tails retain no nested submission history', async () => {
+  const {g}=gpu();g.device.pushErrorScope=()=>{};g.device.popErrorScope=async()=>null;
+  for(let i=0;i<128;i++)g.submit(g.device.createCommandEncoder(),'render');
+  assert.equal(await g.validationTail,undefined);assert.equal(g.firstError,undefined);
+});

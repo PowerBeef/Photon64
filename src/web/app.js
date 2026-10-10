@@ -64,6 +64,11 @@ async function initGpu() {
     gpu.desc = desc;
   } catch (e) { console.error(e); gpu = null; gpuErr = String(e.message || e).slice(0, 160); }
 }
+function dropLostGpu() {
+  if (gpuErr !== 'device lost' || !gpu) return;
+  const g = gpu; gpu = null; g.onError = g.onLost = null;
+  g.dispose(); g.device.destroy();
+}
 
 function applyRenderer() {
   if (busy) { busy.then(applyRenderer, rendererFailure); return; }      // (a field is waiting for GPU results: switch afterwards)
@@ -216,14 +221,16 @@ async function openFile(file) {
     let data = new Uint8Array(await file.arrayBuffer()), name = file.name;
     if (data[0] === 0x50 && data[1] === 0x4B) ({ data, name } = await unzip(data));
     if (token !== selection) return;
-    await loadRom(data, name, false, token);
+    await loadRom(data, name, false, token, true);
   } catch (e) { if (token === selection) { console.error(e); toast(String(e.message || e), 4000); } }
   finally { finish(); }
 }
 
-function loadRom(data, fileName, fromLibrary, token) {
+function loadRom(data, fileName, fromLibrary, token, owned = false) {
   validateRom(data);
-  const candidate = data.slice();
+  // File/cache readers already own an immutable candidate; public callers are
+  // snapshotted so later mutations cannot change a queued cartridge selection.
+  const candidate = owned ? data : data.slice();
   return sessionOp(() => token !== undefined && token !== selection ? false : loadRomNow(candidate, fileName, fromLibrary, token));
 }
 function romIdentity(data, fileName) {
@@ -301,7 +308,7 @@ async function loadRomNow(data, fileName, fromLibrary, token) {
   u32v()[hi[16] >> 2] = 0;
   ex.n64_config(1, +settings.cpi); ex.n64_config(5, +settings.pak); ex.n64_config(9, settings.vif ? 0 : 1);
   rendererFailed = false;
-  if (gpuErr === 'device lost') gpu = null;
+  dropLostGpu();
   useGpu = false; applyRenderer();
   if (rendererFailed) throw new Error('Renderer initialization failed');
   hz = u32v()[hi[22] >> 2] === 0 ? 50 : 60;
@@ -413,6 +420,7 @@ async function idbWrite(entries, deletes = []) {
 }
 function idbSet(k, v) { return idbWrite([[k, v]]); }
 async function idbHas(k) {
+  if (memStore.has(k)) return true;
   const db = await idbOpen(); if (!db) return memStore.has(k);
   return new Promise(res => { try { const r = db.transaction('kv').objectStore('kv').count(k); r.onsuccess = () => res(r.result > 0); r.onerror = () => res(false); } catch (e) { res(false); } });
 }
@@ -1261,7 +1269,7 @@ async function libStart(e) {
     const buf = await idbGet('rom:' + e.key);
     if (!buf) { toast('That game is no longer stored here — add it again', 3500); return libRemove(e.key); }
     if (token !== selection) return;
-    await loadRom(new Uint8Array(buf), e.file || e.name, true, token);
+    await loadRom(new Uint8Array(buf), e.file || e.name, true, token, true);
   } catch (err) { console.error(err); toast(String(err.message || err), 4000); }
 }
 async function renderLibrary() {

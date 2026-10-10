@@ -1,0 +1,345 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> photon64@1.0.0 validate
+> tools/validate.sh
+
+In file included from src/n64.c:3:
+In file included from src/../third_party/softfloat/photon.c:44:
+src/../third_party/softfloat/s_roundPackToF32.c:106:2: warning: unused label 'packReturn' [-Wunused-label]
+  106 |  packReturn:
+      |  ^~~~~~~~~~~
+In file included from src/n64.c:3:
+In file included from src/../third_party/softfloat/photon.c:45:
+src/../third_party/softfloat/s_roundPackToF64.c:110:2: warning: unused label 'packReturn' [-Wunused-label]
+  110 |  packReturn:
+      |  ^~~~~~~~~~~
+2 warnings generated.
+-rwxr-xr-x 1 root root 157478 Oct 10 16:54 out/n64.wasm
+out/photon64.html 444.8 KB (wasm 205.1 KB b64)
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> photon64@1.0.0 test
+> node tools/jscheck.mjs && node --test tools/*.test.mjs
+
+ok   zip stored roundtrip
+ok   zip deflated roundtrip
+ok   zip truncated csize rejected
+ok   zip bad local offset rejected
+ok   zip stored size lie rejected
+ok   zip oversize usize rejected
+ok   zip deflate size lie rejected
+ok   zip expansion beyond declared budget rejected
+ok   zip CRC mismatch rejected
+ok   zip invalid local signature rejected
+ok   zip encrypted flags rejected
+ok   checkRomSize 64MB ok / 64MB+1 throws
+ok   views cached, refreshed on buffer swap
+ok   stateMeta backfills every slot
+ok   stateMeta keeps existing meta
+15 checks, 0 failures
+✔ replay input supports all controller buttons and signed analog axes (2.266935ms)
+✔ mistyped or unbounded replay inputs fail instead of silently changing gameplay (0.427085ms)
+✔ timing summaries retain tail latency and reject empty or invalid evidence (0.444638ms)
+✔ quit exits even while the caller keeps stdin open (124.553698ms)
+✔ interactive core preserves a live machine, rejects invalid steps, and captures its VI (876.23091ms)
+✔ actual WASM: same-cartridge replacement restores the latest battery write (49.710399ms)
+✔ synchronous renderer initialization failure stops the session (2.043147ms)
+✔ transaction abort keeps dirty progress and retry commits (2.040744ms)
+✔ old save completion does not clear a later guest write (8.883686ms)
+✔ temporary storage stays dirty and is visibly labelled (18.14621ms)
+✔ state payload and metadata abort together; duplicate saves preserve running intent (7.413676ms)
+✔ oversize file is rejected before arrayBuffer (2.5273ms)
+✔ bounded decoder cancels on first over-budget chunk (3.114764ms)
+✔ actual WASM: A/B loads queue; batteries and cached cartridge identities agree (46.863106ms)
+✔ synchronous presentation failure stops fields and preserves battery export (3.345685ms)
+✔ presentation resize preserves high-DPI aspect ratio while limiting allocation (2.483508ms)
+✔ actual WASM: dirty reset survives power cycle; aborted reset retains progress (30.524004ms)
+✔ actual WASM: state restore drains older saves and makes restored battery durable (700.273656ms)
+✔ canonical SHA256 matches independent digest across byte orders and payload variants (24.905354ms)
+✔ same header with different content has distinct caches and state keys (351.455068ms)
+✔ verified legacy migration is atomic and retains a recoverable original (22.67187ms)
+✔ latest file selection wins even when the first read finishes last (21.921482ms)
+✔ state slot existence never reads compressed payloads (3.300162ms)
+✔ obsolete scale failure cannot override a newer successful request (2.665539ms)
+✔ audio initialization closes partial context and succeeds on retry (1.761163ms)
+✔ audio resampler reports underruns and bounded overruns at 44.1/48 kHz (5.625876ms)
+✔ four controllers retain ports through disconnect and reconnect (1.954894ms)
+✔ cross-tab cartridge lock rejects a competing writer before replacing the game (29.86558ms)
+✔ zero checkpoints fails JS and Python gates (27.724276ms)
+✔ missing checkpoint fails JS and Python gates (26.233057ms)
+✔ duplicate checkpoint fails JS and Python gates (28.6173ms)
+✔ runner error fails JS and Python gates (28.903464ms)
+✔ VI difference fails JS and Python gates (27.619982ms)
+✔ state mismatch fails JS and Python gates (23.305311ms)
+✔ missing comparisons fails JS and Python gates (21.169751ms)
+✔ missing primitive coverage fails JS and Python gates (22.270253ms)
+✔ missing rendered framebuffer fails JS and Python gates (22.577325ms)
+✔ color dc mismatch fails JS and Python gates (22.601529ms)
+✔ color dh mismatch fails JS and Python gates (20.741284ms)
+✔ depth dc mismatch fails JS and Python gates (26.290903ms)
+✔ depth dh mismatch fails JS and Python gates (23.116449ms)
+✔ clean JSON at byte zero and legacy prefixed JSON both pass (45.582937ms)
+✔ malformed JSON and diagnostic SKIP cannot satisfy a required lane (49.719938ms)
+✔ composed suite rejects process failure and empty / mismatched results (833.735539ms)
+✔ full sync range includes every chunk tail (5.52708ms)
+✔ rejected readback retains regions, destroys staging and never acknowledges (2.553508ms)
+✔ submission failure also retains regions and destroys resources (0.805471ms)
+✔ successful barrier applies bytes before acknowledging (0.625786ms)
+✔ old generation completion cannot apply bytes after reset (0.812775ms)
+✔ obsolete synchronization barrier cannot acknowledge a new generation (0.594708ms)
+✔ lost device never acknowledges an empty synchronization barrier (0.372194ms)
+✔ feedback snapshot offsets remain aligned for odd halfword counts (0.652687ms)
+✔ negative apron and circular touched ranges include both ends (0.642898ms)
+✔ debug readback map failure destroys its staging buffer (0.84766ms)
+✔ asynchronous validation error blocks acknowledgement and records first cause (1.805444ms)
+✔ partially built scale set is destroyed after pipeline rejection (1.441186ms)
+✔ exact HD-at-1x checks reject aliased storage before execution (2.914381ms)
+✔ full-size HD checks and explicit diagnostics pass the configuration gate (0.986829ms)
+✔ release requires every exact named job including GPU and branded Safari (3.590751ms)
+ℹ tests 59
+ℹ suites 0
+ℹ pass 59
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1488.772223
+In file included from tools/../src/n64.c:6,
+                 from tools/native.c:3:
+tools/../src/rsp.c: In function ‘clamp_u’:
+tools/../src/rsp.c:256:19: note: the ABI for passing parameters with 32-byte alignment has changed in GCC 4.6
+  256 | static inline v16 clamp_u(v32 hm) {
+      |                   ^~~~~~~
+-rwxr-xr-x 1 root root 215600 Oct 10 16:54 out/native
+In file included from tools/../src/n64.c:6,
+                 from tools/rsptest.c:7:
+tools/../src/rsp.c: In function ‘clamp_u’:
+tools/../src/rsp.c:256:19: note: the ABI for passing parameters with 32-byte alignment has changed in GCC 4.6
+  256 | static inline v16 clamp_u(v32 hm) {
+      |                   ^~~~~~~
+ok   vmacq: [47:21]==0 ignores low bits (31,accl=ffff)
+ok   vmacq: bit21 set keeps 32
+ok   vmacq: 64-32
+ok   vmacq: -1 keeps (bit21 set)
+ok   vmacq: -64+32
+ok   vmacq: saturate high -> 32752
+ok   vmacq: saturate low -> -32768
+ok   vmacq: lanes independent
+ok   vrsq: input 0 -> vd=low(-1) divout=high(0x7FFF)
+ok   vrsq: input -32768 -> vd=0 divout=-1
+ok   vrsq: acc_l = broadcast vt[2]
+ok   vrsq: rsq table exact (512 entries)
+ok   vrcp: rcp[0] anchor
+ok   vrsqh: stages divin, returns old divout
+ok   vrsql: consumes divdp, deterministic
+ok   vrcp: input 0 -> vd=-1 divout=0x7FFF
+ok   vmov: e=8 scalar src
+ok   vmov: e=2 lane-mix src
+rsptest: 18 checks, 0 failed
+In file included from tools/../src/n64.c:6,
+                 from tools/bustest.c:7:
+tools/../src/rsp.c: In function ‘clamp_u’:
+tools/../src/rsp.c:256:19: note: the ABI for passing parameters with 32-byte alignment has changed in GCC 4.6
+  256 | static inline v16 clamp_u(v32 hm) {
+      |                   ^~~~~~~
+ok   0x02 normal: 32B payload + crc, no error
+ok   0x02 short rx: error bit set
+ok   0x02 short rx: bytes past slot intact
+ok   0x02 short tx: error bit set
+ok   0x03 normal: payload stored + crc ack
+ok   0x03 short tx: error bit set
+ok   0x03 short tx: mempak untouched
+ok   0x03 rx=0: error bit set
+ok   0x03 rx=0: slot byte intact
+ok   0x04 normal: 8B block, no error
+ok   0x04 short rx: error bit set
+ok   0x04 short rx: bytes past slot intact
+ok   0x05 normal: block stored + zero ack
+ok   0x05 short tx: error bit set
+ok   0x05 short tx: eeprom untouched
+ok   0x00 short rx: clamps, no error
+ok   masked zero TX rejected before adjacent command dispatch
+17 checks, 0 failures
+In file included from tools/../src/n64.c:6,
+                 from tools/cputest.c:8:
+tools/../src/rsp.c: In function ‘clamp_u’:
+tools/../src/rsp.c:256:19: note: the ABI for passing parameters with 32-byte alignment has changed in GCC 4.6
+  256 | static inline v16 clamp_u(v32 hm) {
+      |                   ^~~~~~~
+ok   SRA ignores upper half
+ok   SRAV ignores upper half
+ok   SRA sign-extends negatives
+ok   fault raises TLB exception at the LW
+ok   exception clears llbit
+ok   SC succeeds with live link
+ok   LL..SC sequence stores
+ok   ERET clears llbit
+8 checks, 0 failures
+In file included from tools/../src/n64.c:6,
+                 from tools/native.c:3,
+                 from tools/oracle.c:8:
+tools/../src/rsp.c: In function ‘clamp_u’:
+tools/../src/rsp.c:256:19: note: the ABI for passing parameters with 32-byte alignment has changed in GCC 4.6
+  256 | static inline v16 clamp_u(v32 hm) {
+      |                   ^~~~~~~
+-rwxr-xr-x 1 root root 588112 Oct 10 16:54 out/oracle_nn
+In file included from tools/../src/n64.c:6,
+                 from tools/native.c:3,
+                 from tools/oracle.c:8,
+                 from tools/oracle_test.c:4:
+tools/../src/rsp.c: In function ‘clamp_u’:
+tools/../src/rsp.c:256:19: note: the ABI for passing parameters with 32-byte alignment has changed in GCC 4.6
+  256 | static inline v16 clamp_u(v32 hm) {
+      |                   ^~~~~~~
+reference texture coordinates: 589824 checks, 0 failed
+touched frame 16: 3 halfwords, color=2 depth=0 hidden=1 differences
+touched frame 16: 1 halfwords, color=0 depth=0 hidden=1 differences
+oracle coordinates/writes: 958565 checks, 0 failed
+In file included from tools/../src/n64.c:6,
+                 from tools/native.c:3,
+                 from tools/oracle.c:8,
+                 from tools/vitest.c:4:
+tools/../src/rsp.c: In function ‘clamp_u’:
+tools/../src/rsp.c:256:19: note: the ABI for passing parameters with 32-byte alignment has changed in GCC 4.6
+  256 | static inline v16 clamp_u(v32 hm) {
+      |                   ^~~~~~~
+In file included from tools/../src/n64.c:6,
+                 from tools/rdp_vectors.c:2:
+tools/../src/rsp.c: In function ‘clamp_u’:
+tools/../src/rsp.c:256:19: note: the ABI for passing parameters with 32-byte alignment has changed in GCC 4.6
+  256 | static inline v16 clamp_u(v32 hm) {
+      |                   ^~~~~~~
+In file included from tools/../src/n64.c:6,
+                 from tools/rsptest.c:7:
+tools/../src/rsp.c: In function ‘clamp_u’:
+tools/../src/rsp.c:256:19: note: the ABI for passing parameters with 32-byte alignment has changed in GCC 4.6
+  256 | static inline v16 clamp_u(v32 hm) {
+      |                   ^~~~~~~
+ok   vmacq: [47:21]==0 ignores low bits (31,accl=ffff)
+ok   vmacq: bit21 set keeps 32
+ok   vmacq: 64-32
+ok   vmacq: -1 keeps (bit21 set)
+ok   vmacq: -64+32
+ok   vmacq: saturate high -> 32752
+ok   vmacq: saturate low -> -32768
+ok   vmacq: lanes independent
+ok   vrsq: input 0 -> vd=low(-1) divout=high(0x7FFF)
+ok   vrsq: input -32768 -> vd=0 divout=-1
+ok   vrsq: acc_l = broadcast vt[2]
+ok   vrsq: rsq table exact (512 entries)
+ok   vrcp: rcp[0] anchor
+ok   vrsqh: stages divin, returns old divout
+ok   vrsql: consumes divdp, deterministic
+ok   vrcp: input 0 -> vd=-1 divout=0x7FFF
+ok   vmov: e=8 scalar src
+ok   vmov: e=2 lane-mix src
+rsptest: 18 checks, 0 failed
+In file included from tools/../src/n64.c:6,
+                 from tools/bustest.c:7:
+tools/../src/rsp.c: In function ‘clamp_u’:
+tools/../src/rsp.c:256:19: note: the ABI for passing parameters with 32-byte alignment has changed in GCC 4.6
+  256 | static inline v16 clamp_u(v32 hm) {
+      |                   ^~~~~~~
+ok   0x02 normal: 32B payload + crc, no error
+ok   0x02 short rx: error bit set
+ok   0x02 short rx: bytes past slot intact
+ok   0x02 short tx: error bit set
+ok   0x03 normal: payload stored + crc ack
+ok   0x03 short tx: error bit set
+ok   0x03 short tx: mempak untouched
+ok   0x03 rx=0: error bit set
+ok   0x03 rx=0: slot byte intact
+ok   0x04 normal: 8B block, no error
+ok   0x04 short rx: error bit set
+ok   0x04 short rx: bytes past slot intact
+ok   0x05 normal: block stored + zero ack
+ok   0x05 short tx: error bit set
+ok   0x05 short tx: eeprom untouched
+ok   0x00 short rx: clamps, no error
+ok   masked zero TX rejected before adjacent command dispatch
+17 checks, 0 failures
+In file included from tools/../src/n64.c:6,
+                 from tools/cputest.c:8:
+tools/../src/rsp.c: In function ‘clamp_u’:
+tools/../src/rsp.c:256:19: note: the ABI for passing parameters with 32-byte alignment has changed in GCC 4.6
+  256 | static inline v16 clamp_u(v32 hm) {
+      |                   ^~~~~~~
+ok   SRA ignores upper half
+ok   SRAV ignores upper half
+ok   SRA sign-extends negatives
+ok   fault raises TLB exception at the LW
+ok   exception clears llbit
+ok   SC succeeds with live link
+ok   LL..SC sequence stores
+ok   ERET clears llbit
+8 checks, 0 failures
+In file included from tools/../src/n64.c:6,
+                 from tools/coretest.c:2:
+tools/../src/rsp.c: In function ‘clamp_u’:
+tools/../src/rsp.c:256:19: note: the ABI for passing parameters with 32-byte alignment has changed in GCC 4.6
+  256 | static inline v16 clamp_u(v32 hm) {
+      |                   ^~~~~~~
+11912 checks, 0 failures (first 0)
+In file included from tools/../src/n64.c:6,
+                 from tools/native.c:3,
+                 from tools/rawtest.c:2:
+tools/../src/rsp.c: In function ‘clamp_u’:
+tools/../src/rsp.c:256:19: note: the ABI for passing parameters with 32-byte alignment has changed in GCC 4.6
+  256 | static inline v16 clamp_u(v32 hm) {
+      |                   ^~~~~~~
+29 raw-output boundary checks passed
+WASM O0: 11912 checks, 0 failures (first 0)
+WASM O3: 11912 checks, 0 failures (first 0)
+ok   Donkey Kong 64                             group 3, auto installs
+ok   Majora's Mask (J)                          group 3, auto installs
+ok   Perfect Dark (E)                           group 3, auto installs
+ok   Dinosaur Planet                            group 3, auto installs
+ok   StarCraft 64                               group 2, auto installs
+ok   Rush 2049                                  group 2, auto installs
+ok   Gauntlet Legends (J)                       group 2, auto installs
+ok   Indiana Jones                              group 2, auto installs
+ok   Turok 2                                    group 1, auto installs
+ok   Resident Evil 2                            group 1, auto installs
+ok   Biohazard 2                                group 1, auto installs
+ok   Pokemon Stadium 2                          group 1, auto installs
+ok   Tony Hawk 3                                group 1, auto installs
+ok   Episode I Racer                            group 1, auto installs
+ok   Rogue Squadron                             group 1, auto installs
+ok   The World Is Not Enough                    group 1, auto installs
+ok   Castlevania LoD                            group 1, auto installs
+ok   Super Mario 64                             group 0, auto installs
+ok   GoldenEye                                  group 0, auto installs
+ok   Ocarina of Time                            group 0, auto installs
+ok   Toukon Road 2 (not Tony Hawk 3)            group 0, auto installs
+ok   Pocket Monsters Stadium 2 (= Stadium 1)    group 0, auto installs
+ok   homebrew without a game code               group 0, auto installs
+ok   Silicon Valley (U) 1.0                     group 4, auto leaves out
+ok   Silicon Valley (U) 1.1                     group 0, auto installs
+ok   Silicon Valley (E)                         group 0, auto installs
+ok   Silicon Valley (J)                         group 4, auto leaves out
+ok   Iggy's Reckin' Balls                       group 4, auto leaves out
+ok   setting changed while running: still installed, removal pending
+ok   after reset: removed
+ok   back to automatic and reset: installed
+all passed
+PASS RSPCP2VRCP.N64 300 frames twice; prims=0; rdram=d1963359
+PASS RSPCP2VRCPH.N64 300 frames twice; prims=0; rdram=3ba00c87
+PASS RSPCP2VRCPL.N64 300 frames twice; prims=0; rdram=55dc6d2b
+PASS RSPCP2VSAR.N64 300 frames twice; prims=0; rdram=77c9deb5
+PASS RSPTransposeMatrixVMOV.N64 300 frames twice; prims=0; rdram=3e8e7d25
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.001s
+
+OK
+PASS RSPCP2VRCP.N64 raw RGB pixels different: 0
+PASS RSPCP2VRCPH.N64 raw RGB pixels different: 0
+PASS RSPCP2VRCPL.N64 raw RGB pixels different: 0
+PASS RSPCP2VSAR.N64 raw RGB pixels different: 0
+PASS RSPTransposeMatrixVMOV.N64 raw RGB pixels different: 0
+5 raw fixtures; 0 failures
+PASS VI testroms/RSPCP2VRCP.N64: 95 fields, 29184000 RGB pixels, 0 differences (registers/field order exact; reference random bits zero)
+PASS VI testroms/RSPCP2VRCPH.N64: 95 fields, 29184000 RGB pixels, 0 differences (registers/field order exact; reference random bits zero)
+PASS VI testroms/RSPCP2VRCPL.N64: 95 fields, 29184000 RGB pixels, 0 differences (registers/field order exact; reference random bits zero)
+PASS VI testroms/RSPCP2VSAR.N64: 95 fields, 29184000 RGB pixels, 0 differences (registers/field order exact; reference random bits zero)
+PASS VI testroms/RSPTransposeMatrixVMOV.N64: 95 fields, 29184000 RGB pixels, 0 differences (registers/field order exact; reference random bits zero)

@@ -1,0 +1,16 @@
+Warning: maxDynamicUniformBuffersPerPipelineLayout artificially reduced from 500000 to 16 to fit dynamic offset allocation limit.
+Warning: maxDynamicStorageBuffersPerPipelineLayout artificially reduced from 500000 to 16 to fit dynamic offset allocation limit.
+{
+ "mode": "rdp-vectors",
+ "batches": 14,
+ "halfwords": 896,
+ "registers": 168,
+ "adapter": {
+  "subgroupMatrixConfigs": []
+ },
+ "coverage": "authored batches; framebuffer/hidden bits and all twelve retained registers",
+ "verdict": {
+  "outcome": "PASS",
+  "reason": "synthetic GPU framebuffer, hidden bits and feedback registers"
+ }
+}

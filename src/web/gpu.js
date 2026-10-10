@@ -30,17 +30,21 @@ class N64Gpu {
     this.readbackError ||= error instanceof Error ? error : new Error(event.message);
     this.onError?.(this.readbackError);
   }
-  diagnostics() { return { adapter: this.adapter ? { vendor: this.adapter.info?.vendor, architecture: this.adapter.info?.architecture, device: this.adapter.info?.device, description: this.adapter.info?.description, fallback: this.adapter.info?.isFallbackAdapter ?? this.adapter.isFallbackAdapter } : {}, scale: this.scaleLog2 || 0, requestedScale: this.scaleWant || 0, lost: !!this.lost, pending: this.pending || 0, completed: this.done || 0, firstError: this.firstError || null, errors: this.errors || [], stats: this.stats || {}, targetBytes: FB_WORDS * 4 + (this.hd ? this.hdWords * 4 * this.hd.S * this.hd.S : 0) }; }
-  submit(encoder, phase) {
+  diagnostics() { return { generation: this.generation || 0, adapter: this.adapter ? { vendor: this.adapter.info?.vendor, architecture: this.adapter.info?.architecture, device: this.adapter.info?.device, description: this.adapter.info?.description, fallback: this.adapter.info?.isFallbackAdapter ?? this.adapter.isFallbackAdapter } : {}, scale: this.scaleLog2 || 0, requestedScale: this.scaleWant || 0, lost: !!this.lost, pending: this.pending || 0, completed: this.done || 0, firstError: this.firstError || null, errors: this.errors || [], stats: this.stats || {}, targetBytes: FB_WORDS * 4 + (this.hd ? this.hdWords * 4 * this.hd.S * this.hd.S : 0) }; }
+  checkedSync(fn, phase) {
     const d = this.device, generation = this.generation;
     // Pop immediately, before any await, so concurrent callers cannot steal scopes.
     d.pushErrorScope?.('validation');
-    try { d.queue.submit([encoder.finish()]); } catch (e) { this.fail(e, phase); throw e; }
+    try { return fn(); } catch (e) { this.fail(e, phase); throw e; }
     finally { if (d.popErrorScope) {
-      const checked = d.popErrorScope().then(e => { if (e && generation === this.generation) { this.fail(e, phase); throw new Error(e.message); } });
-      this.validationTail = Promise.all([this.validationTail || Promise.resolve(), checked]); this.validationTail.catch(() => {});
+      const checked = d.popErrorScope().then(e => { if (e && generation === this.generation) throw new Error(e.message); }).catch(e => { if (generation === this.generation) { this.fail(e, phase); throw e; } });
+      // Resolve to void: retaining Promise.all's nested results would keep an
+      // ever-growing history of every completed submission/upload alive.
+      this.validationTail = Promise.all([this.validationTail || Promise.resolve(), checked]).then(() => {}); this.validationTail.catch(() => {});
     } }
   }
+  submit(encoder, phase) { return this.checkedSync(() => this.device.queue.submit([encoder.finish()]), phase); }
+  writeBuffer(...args) { return this.checkedSync(() => this.device.queue.writeBuffer(...args), 'upload'); }
   destroySet(set) { if (!set) return; if (set.hd) set.target?.destroy(); set.feedbackBuf?.destroy(); set.aaTex?.destroy(); set.outTex?.destroy(); }
   dispose() {
     this.scaleSeq = (this.scaleSeq || 0) + 1; this.disposed = true;
@@ -165,8 +169,8 @@ class N64Gpu {
     this.viUbuf = mk(144, B.UNIFORM | B.COPY_DST);
     // constant tables
     const q = device.queue, buf = this.mem.buffer;
-    q.writeBuffer(this.tablesBuf, 73728 * 4, buf, this.p.lut, 0x8000);
-    q.writeBuffer(this.tablesBuf, 81920 * 4, buf, this.p.tables, 160 * 4);
+    this.writeBuffer(this.tablesBuf, 73728 * 4, buf, this.p.lut, 0x8000);
+    this.writeBuffer(this.tablesBuf, 81920 * 4, buf, this.p.tables, 160 * 4);
 
     this.format = navigator.gpu.getPreferredCanvasFormat();
     if (canvas) {
@@ -190,6 +194,8 @@ class N64Gpu {
     this.viU = new ArrayBuffer(144); this.viU32 = new Uint32Array(this.viU); this.viF32 = new Float32Array(this.viU);
     this.stats = { batches: 0, uploads: 0, merges: 0, readbacks: 0, syncs: 0, waits: 0, late: 0 };
     this.pending = 0; this.done = 0;
+    await this.validationTail;
+    if (this.lost) throw this.readbackError || new Error('GPU device lost during initialization');
 
     // (nothing here switches the core to GPU rendering: the owner calls reset() when it wants that)
   }
@@ -237,7 +243,7 @@ class N64Gpu {
   // a freshly selected high-resolution copy starts as the emulated-resolution GPU memory, replicated
   fillHd() {
     const q = this.device.queue, set = this.hd;
-    q.writeBuffer(this.mergeUbuf, 0, new Uint32Array([0, FB_WORDS, FB_WORDS - 1, 0]));
+    this.writeBuffer(this.mergeUbuf, 0, new Uint32Array([0, FB_WORDS, FB_WORDS - 1, 0]));
     const enc = this.device.createCommandEncoder();
     enc.copyBufferToBuffer(this.native.feedbackBuf, 0, set.feedbackBuf, 0, 48);
     const pass = enc.beginComputePass();
@@ -248,8 +254,8 @@ class N64Gpu {
   // staged halfwords -> GPU (and the high-resolution copy when active)
   merge(idx, count) {
     const q = this.device.queue, set = this.hd || this.native;
-    q.writeBuffer(this.stageBuf, 0, this.mem.buffer, this.p.stage, count * 4);
-    q.writeBuffer(this.mergeUbuf, 0, new Uint32Array([idx, count, FB_WORDS - 1, 0]));
+    this.writeBuffer(this.stageBuf, 0, this.mem.buffer, this.p.stage, count * 4);
+    this.writeBuffer(this.mergeUbuf, 0, new Uint32Array([idx, count, FB_WORDS - 1, 0]));
     const enc = this.device.createCommandEncoder(), pass = enc.beginComputePass();
     pass.setPipeline(set.merge); pass.setBindGroup(0, set.mergeBG); pass.dispatchWorkgroups(Math.ceil(count / 256)); pass.end();
     this.submit(enc, 'render');
@@ -273,10 +279,10 @@ class N64Gpu {
     const n = this.p.syncMax, q = this.device.queue;
     for (let i = 0; i < FB_WORDS; i += n) {
       this.ex.n64_sync_full(i, n);
-      if (this.hd) this.merge(i, n); else q.writeBuffer(this.fbBuf, i * 4, this.mem.buffer, this.p.stage, n * 4);
+      if (this.hd) this.merge(i, n); else this.writeBuffer(this.fbBuf, i * 4, this.mem.buffer, this.p.stage, n * 4);
     }
-    q.writeBuffer(this.native.feedbackBuf, 0, this.mem.buffer, this.p.feedback, 48);
-    if (this.hd) q.writeBuffer(this.hd.feedbackBuf, 0, this.mem.buffer, this.p.feedback, 48);
+    this.writeBuffer(this.native.feedbackBuf, 0, this.mem.buffer, this.p.feedback, 48);
+    if (this.hd) this.writeBuffer(this.hd.feedbackBuf, 0, this.mem.buffer, this.p.feedback, 48);
     new Uint32Array(this.mem.buffer)[this.p.feedbackDirty >> 2] = 0;
     this.touched.clear();
     for (const j of this.inflight) j.dead = true;
@@ -297,7 +303,7 @@ class N64Gpu {
       const r = this.p.runs >> 2;
       for (let i = 0; i < nruns; i++) {
         const s = u32[r + i * 2], n = u32[r + i * 2 + 1];
-        q.writeBuffer(this.fbBuf, (idx + s) * 4, buf, this.p.stage + s * 4, n * 4);
+        this.writeBuffer(this.fbBuf, (idx + s) * 4, buf, this.p.stage + s * 4, n * 4);
         for (const j of this.inflight) j.excl.push([idx + s, idx + s + n]);
       }
       this.stats.uploads += nruns;
@@ -323,17 +329,17 @@ class N64Gpu {
     if (zUse) this.syncRange(depth, pixels);
     const q = this.device.queue;
     if (u32[this.p.feedbackDirty >> 2]) {
-      q.writeBuffer(this.native.feedbackBuf, 0, buf, this.p.feedback, 48);
-      if (this.hd) q.writeBuffer(this.hd.feedbackBuf, 0, buf, this.p.feedback, 48);
+      this.writeBuffer(this.native.feedbackBuf, 0, buf, this.p.feedback, 48);
+      if (this.hd) this.writeBuffer(this.hd.feedbackBuf, 0, buf, this.p.feedback, 48);
       u32[this.p.feedbackDirty >> 2] = 0;
     }
-    q.writeBuffer(this.ubuf, 0, buf, this.p.b_info, 80);
-    q.writeBuffer(this.primsBuf, 0, buf, this.p.b_prims, np * 288);
-    q.writeBuffer(this.spansBuf, 0, buf, this.p.b_spans, (ns + 1) * 32);
-    q.writeBuffer(this.tablesBuf, 0, buf, this.p.b_states, nst * 64);
-    q.writeBuffer(this.tablesBuf, 8192 * 4, buf, this.p.b_tiles, nts * 256);
-    q.writeBuffer(this.tmemBuf, 0, buf, this.p.b_tmem, ntm * 4096);
-    q.writeBuffer(this.binsBuf, 0, buf, this.p.bins, binsWords * 4);
+    this.writeBuffer(this.ubuf, 0, buf, this.p.b_info, 80);
+    this.writeBuffer(this.primsBuf, 0, buf, this.p.b_prims, np * 288);
+    this.writeBuffer(this.spansBuf, 0, buf, this.p.b_spans, (ns + 1) * 32);
+    this.writeBuffer(this.tablesBuf, 0, buf, this.p.b_states, nst * 64);
+    this.writeBuffer(this.tablesBuf, 8192 * 4, buf, this.p.b_tiles, nts * 256);
+    this.writeBuffer(this.tmemBuf, 0, buf, this.p.b_tmem, ntm * 4096);
+    this.writeBuffer(this.binsBuf, 0, buf, this.p.bins, binsWords * 4);
     const enc = this.device.createCommandEncoder(), tilesY = ntiles / tilesX;
     const ordered = !!u32[bi + 19];
     for (const set of [this.native, this.hd].filter(Boolean)) {
@@ -468,7 +474,7 @@ class N64Gpu {
       F[32] = Math.max(1, Math.floor(dw / (OUT_W * S))); F[33] = Math.max(1, Math.floor(dh / (outH * S)));
     }
     const q = this.device.queue;
-    q.writeBuffer(this.viUbuf, 0, this.viU);
+    this.writeBuffer(this.viUbuf, 0, this.viU);
     const enc = this.device.createCommandEncoder();
     if (valid) {
       const aw = Math.min(W + 2, AA_W) * S, ah = Math.min(H, AA_H) * S;

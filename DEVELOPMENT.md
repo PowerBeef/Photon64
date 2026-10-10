@@ -45,7 +45,7 @@ node tools/dawntest.mjs testroms/RSPCP2VRCP.N64 1 "0" "" --fn tools/rdp_gpu_vect
 node tools/dawntest.mjs testroms/RSPCP2VRCP.N64 1 "0" "" --fn tools/rdp_gpu_vectors.js --hd 0
 ```
 
-These vectors compare framebuffer/hidden data and twelve retained registers across twelve batches, separately from VI/gameplay verdicts. Dependent/two-cycle batches use ordered dispatch; independent batches retain parallel rasterization. `stats.orderedBatches` reports scheduling counts. Low-format software fallback synchronizes prior GPU work and uploads its retained/hidden state before subsequent GPU batches. Ordered rendering can be slower; physical-device performance remains unmeasured.
+These vectors compare framebuffer/hidden data and twelve retained registers across fourteen batches (twelve independent-reference streams plus two explicitly software-contract boundary streams), separately from VI/gameplay verdicts. Dependent/two-cycle batches use ordered dispatch; independent batches retain parallel rasterization. `stats.orderedBatches` reports scheduling counts. Low-format software fallback synchronizes prior GPU work and uploads its retained/hidden state before subsequent GPU batches. Ordered rendering can be slower; physical-device performance remains unmeasured.
 
 To reproduce the Mario Kart accuracy replay and native/HD-at-1x parity around the repaired pixel:
 
@@ -144,3 +144,13 @@ VK_ICD_FILENAMES="$PWD/.tools/lvp_icd.json" node tools/dawntest.mjs \
 ```
 
 Use the sanitizer baseline for CPU/memory failures, `n64_debug_state()` and exact replay counters for machine-state diagnosis, Dawn's `--trace` for GPU copy-back ordering, and the independent oracle for renderer accuracy. Do not infer audio-device latency, physical controller behavior, WebGPU device performance or complete game compatibility from these lanes. See `VALIDATION_REPORT.md` for executed evidence and unresolved failures.
+
+## Audit implementation gates
+
+Run `node tools/gpu_lifecycle.mjs` with the selected Vulkan/Metal adapter. The default cartridge is generated from authored MIPS/RDP source in `gpu_fixture.mjs`; it performs real drawing and CPU reads/partial stores of wrapped GPU targets. All RDRAM, effective hidden bits and twelve retained registers are compared after each of 180 fields, including state restore and reset. Zero GPU batches fail. An optional permitted ROM path uses the same lifecycle transitions; this is bounded boot coverage without recorded gameplay inputs.
+
+`RDP_BOUNDARY_DIAGNOSTIC=1 ./out/oracle_test` is an intentionally failing diagnostic retaining the unresolved installed-RAM address-window disagreement. Existing independent streams still require zero differences. The fourteen GPU vectors compare Photon64’s C/WGSL contract; the two boundary streams are not independently hardware checked.
+
+The required matrix has exactly nine named jobs: baseline, GPU, Safari and six browser variants. Safari journals every request and requires desktop-alone plus five clean full sequences, stopping at the first failure. `filecheck.mjs` separately tests direct-file import/core/storage/audio initialization. Physical file choosers, real output quality and physical GPU performance are separate device gates. Release packaging reads notices from the selected source SHA, validates the tested artifact digest and requires the explicit job set. Changing the release workflow alone does not republish an older manifest.
+
+See [migration/recovery](MIGRATION.md), [capability limits](CAPABILITIES.md) and [implementation status](reports/implementation-2026-10-10/REPORT.md).

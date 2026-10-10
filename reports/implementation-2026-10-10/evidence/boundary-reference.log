@@ -1,0 +1,6 @@
+reference texture coordinates: 589824 checks, 0 failed
+touched frame 16: 17 halfwords, color=15 depth=0 hidden=15 differences
+frame 16 (vi 0): fb=7ffffc 4x4 fmt=2  color mismatches=14 (87.500%, 14 big)  z mismatches=12
+touched frame 17: 19 halfwords, color=14 depth=13 hidden=2 differences
+frame 17 (vi 0): fb=7ffffc 4x4 fmt=2  color mismatches=14 (87.500%, 14 big)  z mismatches=12
+boundary model diagnostic: color=29 depth=13 hidden=17 (known unresolved address-window difference)

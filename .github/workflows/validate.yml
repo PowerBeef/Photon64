@@ -148,6 +148,7 @@ jobs:
           node tools/dawntest.mjs testroms/RSPCP2VRCP.N64 1 '' --fn tools/rdp_gpu_vectors.js --hd 0 | tee out/gpu-evidence/hd1.json
           node tools/device_loss.mjs | tee out/gpu-evidence/device-loss.json
           node tools/gpu_lifecycle.mjs | tee out/gpu-evidence/lifecycle.json
+          GPU_LIFECYCLE_HD=1 node tools/gpu_lifecycle.mjs | tee out/gpu-evidence/lifecycle-hd1.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

@@ -29,7 +29,7 @@ Open the app, add a cartridge dump, and return to it from your game library. No 
 |---|---|
 | **A local game library** | Drag and drop a ROM or ZIP, with cartridge-style library cards and saved thumbnails. |
 | **Flexible controls** | Remappable keyboard input, standard gamepads, and adjustable touch controls. |
-| **Save your progress** | Battery saves, Controller Pak data, and four save-state slots; import and export game-save data. |
+| **Save your progress** | Battery saves, Controller Pak data, and four save-state slots; development source adds cartridge-checked exports and backup recovery. |
 | **Choose your picture** | Native, 2×, and 4× GPU resolution where supported; console video filtering, scaling choices, and fullscreen. |
 | **Choose your renderer** | WebGPU when a suitable adapter is available, with a C software fallback. |
 | **Keep it portable** | One HTML file to run locally, with games and saves stored in your browser. |
@@ -69,7 +69,7 @@ Then open <http://localhost:8000/photon64.html>.
 
 Games, saves, and states belong to the browser storage for the address you use. Switching browser profiles or moving between a local file and localhost may give you a different library. Use **Settings → Data → Export save** to back up game-save data before clearing browser storage. If persistent storage is unavailable, the app labels the session as temporary.
 
-Save states are tied to the core build and cartridge. A state from a different build can be rejected; keep game-save backups when upgrading.
+Save states are tied to the core build and cartridge. Keep battery backups when upgrading. See [save migration and recovery](MIGRATION.md) for the development build’s cartridge hashing, cross-tab protection, portable files and previous-save recovery.
 
 </details>
 
@@ -217,6 +217,7 @@ For code changes, follow [AGENTS.md](AGENTS.md), run the checks appropriate to t
 
 | Document | Use it for |
 |---|---|
+| [Audit implementation](reports/implementation-2026-10-10/REPORT.md) · [Capabilities](CAPABILITIES.md) · [Save recovery](MIGRATION.md) | Implemented fixes, current acceptance results, and explicit remaining hardware/provenance work. |
 | [Remaining-defect audit (10 October 2026)](reports/audit-2026-10-10/REPORT.md) · [PDF](reports/audit-2026-10-10/Photon64_Audit_2026-10-10.pdf) | Current findings, reproducible probes, and the next implementation sequence. |
 | [Development guide](DEVELOPMENT.md) | Setup, commands, profiling, and reproduction. |
 | [Validation report](VALIDATION_REPORT.md) | Executed results and their limits. |

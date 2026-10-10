@@ -283,3 +283,19 @@ test('actual WASM ROM reserve plateaus across repeated 8/32/64 MiB imports', () 
   assert.ok(measurements[0]<initial+20*1048576);
   assert.deepEqual(measurements.slice(3),[measurements[2],measurements[2],measurements[2]]);
 });
+
+test('public queued loads snapshot caller bytes while owned file loads avoid a second payload copy', async () => {
+  const e=environment(true), data=fake('snapshot',1), expected=await e.api.romDigest(data);
+  const load=e.api.loadRom(data,'snapshot.z64'); data[4096]^=0xff; await load;
+  assert.equal(e.api.getRom().digest,expected);
+  const owned=fake('owned',2); owned.slice=()=>{throw new Error('unexpected duplicate ROM payload')};
+  e.api.setKeep(false); await e.api.loadRom(owned,'owned.z64',false,undefined,true);
+  assert.equal(e.api.getRom().name,'owned');
+});
+
+test('lost renderer recovery releases the old device before software fallback', () => {
+  const e=environment();const calls=[];
+  e.api.setGpu({dispose(){calls.push('dispose')},device:{destroy(){calls.push('destroy')}},onError(){},onLost(){}});
+  vm.runInContext("gpuErr='device lost'; dropLostGpu(); dropLostGpu();",e.context);
+  assert.deepEqual(calls,['dispose','destroy']);
+});
