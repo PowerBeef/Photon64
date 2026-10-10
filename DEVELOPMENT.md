@@ -29,6 +29,8 @@ The GPU predicate compares VI RGB, last-batch framebuffer color/hidden/depth dat
 
 The native oracle disables direct CPU store mappings only in its `RDP_ORACLE` build and observes masked CPU stores plus PI, SI and RSP DMA writes. It materializes queued software drawing before updating the alternate image, preserves untouched bits, and marks CPU-owned hidden bits on both sides through the generated reference adapter. Production builds retain their direct mappings. The required native build also runs `out/oracle_test`: 589824 independently expected texture-coordinate checks and 96 guest-write/order checks. The adapter exposes the pinned reference's perspective divider and sampling clamp only for this test. Both sides zero random bits; this diagnostic policy is not a hardware noise test.
 
+`ACCURACY_INVESTIGATION.md` records the remaining row-alias and pipeline-feedback discrepancies. The five shipped PNGs exactly match fresh native **raw framebuffer** captures; the legacy `cmp_ref.py` compares those images with filtered **VI scanout** and still fails. To reproduce the raw comparison, run `./out/native testroms/RSPCP2VRCP.N64 120 -raw -o out/vrcp-raw- -e 120` and compare decoded RGB pixels of `out/vrcp-raw-00120.png` with `testroms/RSPCP2VRCP.png`. Repeat for the other four fixtures. Raw agreement does not validate VI filtering/interlace. A separate exact raw lane and independently referenced VI lane are planned; existing gate thresholds are unchanged.
+
 To reproduce the Mario Kart accuracy replay and native/HD-at-1x parity around the repaired pixel:
 
 ```sh

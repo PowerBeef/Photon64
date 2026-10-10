@@ -2,7 +2,7 @@
 
 ## Project and source map
 
-Photon64 is an experimental Nintendo 64 emulator: a freestanding C core compiled to WASM, a JavaScript frontend, and native/WebGPU renderers. Read `DEVELOPMENT.md` for commands, `IMPLEMENTATION_PLAN.md` for priorities and acceptance criteria, and `VALIDATION_REPORT.md` for evidence and open failures. Deterministic boot runs or software/GPU agreement do not establish hardware accuracy.
+Photon64 is an experimental Nintendo 64 emulator: a freestanding C core compiled to WASM, a JavaScript frontend, and native/WebGPU renderers. Read `DEVELOPMENT.md` for commands, `IMPLEMENTATION_PLAN.md` for priorities and acceptance criteria, `VALIDATION_REPORT.md` for evidence and open failures, and `ACCURACY_INVESTIGATION.md` for traced residual mechanisms and reference-policy limits. Deterministic boot runs or software/GPU agreement do not establish hardware accuracy.
 
 - `src/n64.c` includes the core; `cpu.c`, `rsp.c`, `rdp.c`, `vi.c`, `bus.c`, `api.c` and `gpu.c` implement machine and host behavior.
 - `src/web/app.js` owns sessions, persistence and UI; `gpu.js` owns GPU coherence; `*.wgsl` implement rendering/merge passes. `app.html` is the bundle template.
