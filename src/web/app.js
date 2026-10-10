@@ -262,7 +262,7 @@ async function loadRomNow(data, fileName, fromLibrary) {
   acc = 0; wakeLock();
   const xp = updateXpak();
   if (xp.kind >= 2 && xp.kind <= 3 && !xp.now) toast(`${name} ${xp.kind === 3 ? 'needs' : 'needs for some of its content'} the Expansion Pak, which is set to Removed in Settings`, 6000);
-  else toast(`${name}${xp.now && xp.kind ? ' · Expansion Pak' : xp.kind === 4 && !xp.now ? ' · Expansion Pak left out' : ''}${useGpu ? '' : gpuStarting && settings.renderer !== 'sw' ? ' · software until WebGPU is ready' : ''}`, gpuStarting ? 4500 : 2200);
+  else toast(`${name}${xp.now && xp.kind ? ' · Expansion Pak' : xp.kind === 4 && !xp.now ? ' · Expansion Pak left out' : ''}${useGpu ? '' : gpuStarting && settings.renderer !== 'sw' ? ' · software until WebGPU is ready' : ''}`, gpuStarting ? 4500 : 2200, true);
   await libAdd(data, fromLibrary, rom, romSize);
   pokeMenu();
 }
@@ -944,8 +944,8 @@ async function wakeLock() { try { if (navigator.wakeLock && !lock) { lock = awai
 // ---------------------------------------------------------------------------------------------- UI
 // Two screens and one sheet. Home is the library; the game screen shows nothing but the picture, the pad and one menu button.
 // That button (or Esc) pauses the game and opens the sheet, which holds the game menu, the save state slots and the settings.
-let toastT = 0, menuT = 0;
-function toast(msg, ms = 1800) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms); }
+let toastT = 0, menuT = 0, readyToast = false;
+function toast(msg, ms = 1800, ready = false) { const t = $('toast'); readyToast = ready; t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms); }
 // with a mouse the menu button fades away until the pointer moves
 function pokeMenu() { const b = $('b-menu'); b.classList.remove('idle'); clearTimeout(menuT); menuT = setTimeout(() => b.classList.add('idle'), 2600); }
 function updateFlag() {              // note at the top of the picture while the game is paused or fast-forwarding
@@ -1040,6 +1040,9 @@ function openSheet(page, opener = document.activeElement) {
   else {
     sheetOpener = opener;
     sheetStack = []; $('sheet').hidden = false;
+    // The menu already names this game; its startup notification should not cover
+    // menu labels on a short screen. Keep storage/renderer warnings visible.
+    if (readyToast) { clearTimeout(toastT); $('toast').classList.remove('show'); readyToast = false; }
     $('home').inert = $('stage').inert = true; releaseInput();
     if (rom) { resumeOnClose = !paused; togglePause(true); }      // the game waits while the sheet is up
   }

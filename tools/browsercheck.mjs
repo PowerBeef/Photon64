@@ -99,6 +99,9 @@ try {
   const failedField = await field(); await page.waitForTimeout(200);
   assert.equal(await field(), failedField);
   assert.match(await page.locator('#toast').textContent(), /Renderer synchronization failed/);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#sheet').isVisible(), true);
+  assert.ok(await page.locator('#toast').evaluate(e => e.classList.contains('show')), 'Opening recovery controls must retain the renderer warning');
   await page.evaluate(() => { window.restorePresentation(); return window.__photon.resetGame(); });
   await page.waitForFunction(() => !window.__photon.rendererFailed && window.__photon.running);
   report.checks.push('presentation failure stops fields; reset recovers');

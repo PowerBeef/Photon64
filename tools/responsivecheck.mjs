@@ -75,6 +75,7 @@ try {
         assert.ok(await page.evaluate(() => window.__photon.touchState.buttons & 0x8000));
       }
       await click('#b-menu'); await check('game-menu'); await shot('menu');
+      assert.ok(await page.locator('#toast').evaluate(e => +getComputedStyle(e).opacity < 0.1), 'Game-ready notification must not cover menu labels');
       assert.deepEqual(await page.evaluate(() => ({ ...window.__photon.touchState })), { buttons: 0, x: 0, y: 0 }, 'Menu must release held input');
       const fields = await field();
       await page.waitForTimeout(100); assert.equal(await field(), fields, 'Menu must pause emulation');

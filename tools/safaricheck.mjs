@@ -8,10 +8,10 @@ import assert from 'node:assert/strict';
 import { auditUi } from './ui-audit.mjs';
 const evidence = process.env.UI_EVIDENCE || 'out/safari-evidence'; fs.mkdirSync(evidence, { recursive: true });
 const report = { outcome: 'FAIL', browser: 'native Safari', cases: [], driverLog: '', limitations: 'macOS Safari only. Window dimensions may be clamped by Safari or the hosted display; actual CSS viewport is recorded. No connected iOS device or mobile GPU claim.' };
-const html = fs.readFileSync('out/photon64.html');
+const html = fs.readFileSync('out/photon64.html'), fixture = fs.readFileSync(process.argv[2] || 'testroms/RSPCP2VRCP.N64');
 const uploadPath = path.resolve('out/Safari-homebrew-with-a-deliberately-long-cartridge-filename.N64');
 fs.copyFileSync(process.argv[2] || 'testroms/RSPCP2VRCP.N64', uploadPath);
-const server = http.createServer((_, res) => { res.setHeader('Content-Type', 'text/html'); res.end(html); });
+const server = http.createServer((req, res) => { const binary = req.url === '/fixture.n64'; res.setHeader('Content-Type', binary ? 'application/octet-stream' : 'text/html'); res.end(binary ? fixture : html); });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
 const port = +(process.env.SAFARI_DRIVER_PORT || 5001), driver = spawn('/usr/bin/safaridriver', ['--port', String(port)]);
 driver.stdout.on('data', b => report.driverLog += b); driver.stderr.on('data', b => report.driverLog += b);
@@ -65,6 +65,26 @@ try {
   await cmd('POST', '/url', { url: `http://127.0.0.1:${server.address().port}` });
   await wait(() => !!window.__photon?.ex);
   await recordErrors();
+  // Probe an independent file input with no app handler and no early clearing.
+  // Do not classify an app import failure as an automation capability failure.
+  await evaluate(() => { const input = document.createElement('input'); input.type = 'file'; input.id = 'driver-file-probe'; input.hidden = true; document.body.appendChild(input); });
+  const probeElement = await cmd('POST', '/element', { using: 'css selector', value: '#driver-file-probe' });
+  await cmd('POST', `/element/${probeElement['element-6066-11e4-a52e-4f735466cecf']}/value`, { text: uploadPath });
+  const probe = await evaluateAsync(async () => {
+    const f = document.getElementById('driver-file-probe').files[0];
+    if (!f) throw Error('Safari driver did not select a probe file');
+    try { const bytes = new Uint8Array(await f.arrayBuffer()); return { size: f.size, length: bytes.length, prefix: [...bytes.slice(0, 4)] }; }
+    catch (e) { return { size: f.size, error: e.name, message: e.message }; }
+  });
+  if (probe.error) {
+    assert.ok(['NotReadableError', 'SecurityError'].includes(probe.error), 'Unexpected file-probe failure');
+    report.filesystemUpload = { outcome: 'SKIP', ...probe, reason: 'The independent OS-backed File read fails before the app participates. Native filesystem chooser validation is blocked on this runner.' };
+  } else {
+    assert.equal(probe.length, fixture.length); assert.deepEqual(probe.prefix, [...fixture.subarray(0, 4)]);
+    report.filesystemUpload = { outcome: 'PASS', ...probe };
+  }
+  console.log('Safari independent file probe:', JSON.stringify(report.filesystemUpload));
+  await evaluate(() => document.getElementById('driver-file-probe').remove());
   for (const [name, width, height] of [['narrow', 390, 844], ['landscape', 1000, 500], ['desktop', 1000, 740]]) {
     await cmd('POST', '/window/rect', { x: 0, y: 0, width, height }); await delay(500);
     const row = { name, requestedWindow: [width, height], phases: [] }; report.cases.push(row);
@@ -80,13 +100,23 @@ try {
     await key('\uE00C'); assert.ok(await evaluate(() => document.activeElement.id === 'h-set'));
     await evaluate(() => window.__photon.settings.renderer = 'sw');
     await evaluate(() => window.__uploadEvents = []);
-    const input = await cmd('POST', '/element', { using: 'css selector', value: '#file' });
-    await cmd('POST', `/element/${input['element-6066-11e4-a52e-4f735466cecf']}/value`, { text: uploadPath });
+    if (report.filesystemUpload.outcome === 'PASS') {
+      const input = await cmd('POST', '/element', { using: 'css selector', value: '#file' });
+      await cmd('POST', `/element/${input['element-6066-11e4-a52e-4f735466cecf']}/value`, { text: uploadPath });
+      row.fileInput = 'OS-backed file selected through native WebDriver';
+    } else {
+      // Still exercise production openFile/File.arrayBuffer with real fixture
+      // bytes in Safari. This is a browser-backed File and synthetic change,
+      // explicitly separate from the blocked OS-backed chooser probe above.
+      await evaluateAsync(async filename => {
+        const response = await fetch('/fixture.n64'); if (!response.ok) throw Error('Fixture fetch failed');
+        const transfer = new DataTransfer(); transfer.items.add(new File([await response.arrayBuffer()], filename));
+        const input = document.getElementById('file'); input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+      }, path.basename(uploadPath));
+      row.fileInput = 'Browser-backed File + synthetic change; native filesystem upload is SKIP';
+    }
     row.upload = await evaluate(() => ({ events: window.__uploadEvents, selected: [...document.getElementById('file').files].map(f => ({ name: f.name, size: f.size })), rom: window.__photon.rom?.name, toast: document.getElementById('toast').textContent }));
     console.log('Safari staged upload:', JSON.stringify(row.upload));
-    // Apple's native driver can stage a file for the next open-panel request.
-    // Activate the actual ROM chooser if no selection event was delivered.
-    if (!row.upload.events?.length && !row.upload.selected.length) await click(await evaluate(() => document.getElementById('drop').getClientRects().length ? '#drop' : '#h-add'));
     await wait(() => !!window.__photon.rom && new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[21], 8)[0] > 2);
     await click('#b-menu'); await check('game-menu'); await shot(name + '-menu');
     const fields = await evaluate(() => new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[21], 8)[0]); await delay(150);
