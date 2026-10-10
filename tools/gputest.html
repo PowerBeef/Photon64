@@ -19,8 +19,13 @@ async function mkCore(wasmBytes, rom, flush) {
   return { ex, hi };
 }
 function b64(u8) { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); }
+function gpuConfigError(cfg) {
+  return cfg.hd === 0 && cfg.hdWords && cfg.hdWords !== 0x400000 && !cfg.noexact
+    ? 'Exact 1x HD comparisons require full RDRAM storage; reduced hdWords aliases addresses' : null;
+}
 
 window.runTest = async function (cfg) {
+  const configError = gpuConfigError(cfg); if (configError) return { error: configError };
   const t00 = performance.now();
   const wasm = await (await fetch('/out/n64.wasm')).arrayBuffer();
   const rom = new Uint8Array(await (await fetch(cfg.rom)).arrayBuffer());
@@ -150,6 +155,7 @@ window.runTest = async function (cfg) {
 };
 // Many ROMs, one browser session: run each for a few frames on both renderers and compare everything visible.
 window.runMulti = async function (cfg) {
+  const configError = gpuConfigError(cfg); if (configError) return { error: configError };
   const wasm = await (await fetch('/out/n64.wasm')).arrayBuffer();
   const sh = {};
   for (const n of ['rdp', 'vi', 'merge']) sh[n] = await (await fetch(`/src/web/${n}.wgsl`)).text();

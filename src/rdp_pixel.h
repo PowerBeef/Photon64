@@ -88,6 +88,10 @@ static inline int perspective_divide(s32 s, s32 t, s32 w, s32 *os, s32 *ot) {
   return overflow;
 }
 
+// The divider's signed 17-bit result is used for LOD. Texture sampling has
+// a separate signed 16-bit saturation stage before the tile shift/mask stage.
+static inline s32 texture_coord(s32 c) { return clampi(c, -0x8000, 0x7FFF); }
+
 // ---- texture ----------------------------------------------------------------
 #define TL_SLO(T) ((s32)(T)[0])
 #define TL_SHI(T) ((s32)(T)[1])
@@ -784,6 +788,7 @@ static inline void shade_and_blend(const s32 *P, const u32 *SP, s32 x, s32 y) {
     s32 t = (stzw[1] + (P[P_DSTZW_DX + 1] & ~0x1F) * lerp_dx) >> 16;
     s32 w = (stzw[3] + (P[P_DSTZW_DX + 3] & ~0x1F) * lerp_dx) >> 16;
     if (perspective) perspective_divide(s, t, w, &s, &t);
+    s = texture_coord(s); t = texture_coord(t);
     const u32 *T0 = TS + (setup_tile & 7) * TILE_WORDS;
     s32 texel0 = sample_texture_copy(T0, TM, s, t, s_offset, tlut);
 #ifdef RDP_DEBUG
@@ -854,8 +859,13 @@ static inline void shade_and_blend(const s32 *P, const u32 *SP, s32 x, s32 y) {
   s32 lod_frac = 0;
   if (uses_lod) compute_lod_2cycle(&tile0, &tile1, &lod_frac, max_level, min_lod, st, st_dx, st_dy, persp_overflow,
                                    (sflags & RS_TEX_LOD) != 0, (sflags & RS_SHARPEN) != 0, (sflags & RS_DETAIL) != 0);
+  st[0] = texture_coord(st[0]); st[1] = texture_coord(st[1]);
   s32 factors[4] = { (s16)(P[P_CONV0] & 0xFFFF), (s16)(P[P_CONV0] >> 16), (s16)(P[P_CONV1] & 0xFFFF), (s16)(P[P_CONV1] >> 16) };
   s32 texel0[4] = {0, 0, 0, 0}, texel1[4] = {0, 0, 0, 0}, zero4[4] = {0, 0, 0, 0};
+#ifdef RDP_DEBUG
+  if (rdp_dbg_on && x == rdp_dbg_x && y == rdp_dbg_y)
+    printf("   [coords] seq %d stw=%d,%d,%d st=%d,%d tile=%u lod=%d\n", P[P_SEQ], stw[0] >> 16, stw[1] >> 16, stw[2] >> 16, st[0], st[1], tile0, lod_frac);
+#endif
   int sample_quad = (sflags & RS_SAMPLE_QUAD) != 0, mid_texel = (sflags & RS_MID_TEXEL) != 0;
   int convert_one = (sflags & RS_CONVERT_ONE) != 0, bilerp0 = (sflags & RS_BILERP0) != 0, bilerp1 = (sflags & RS_BILERP1) != 0;
   int uses_texel1 = (sflags & RS_USES_TEXEL1) != 0;
@@ -884,6 +894,7 @@ static inline void shade_and_blend(const s32 *P, const u32 *SP, s32 x, s32 y) {
     }
     tile1 = tile0;
     uses_texel1 = 1;
+    st[0] = texture_coord(st[0]); st[1] = texture_coord(st[1]);
   }
   if (uses_texel1) {
     if (convert_one && !bilerp1) texture_convert_factors(texel0, factors, texel1);

@@ -61,7 +61,7 @@ static void sp_dma(u32 v, int to_rsp) {
       u32 m = sp_cur.mem & 0x1FF8, d = sp_cur.dram & 0xFFFFF8;
       for (u32 k = 0; k < 8; k += 4) {
         if (to_rsp) *(u32 *)(spmem + m + k) = d + k < sys.rdram_size ? RDRAM32(d + k) : 0;
-        else if (d + k < sys.rdram_size) { RDRAM32(d + k) = *(u32 *)(spmem + m + k); if (unlikely(gpu_watch[(d + k) >> 12])) gpu_mark_dirty(d + k, 4); }
+        else if (d + k < sys.rdram_size) { RDRAM32(d + k) = *(u32 *)(spmem + m + k); RDP_DMA_WRITE(d + k, 4); if (unlikely(gpu_watch[(d + k) >> 12])) gpu_mark_dirty(d + k, 4); }
       }
       sp_cur.dram = (sp_cur.dram + 8) & 0xFFFFFF;
       sp_cur.mem = (sp_cur.mem & 0x1000) | ((sp_cur.mem + 8) & 0xFFF);

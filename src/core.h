@@ -9,6 +9,21 @@ typedef uint16_t u16; typedef int16_t s16;
 typedef uint32_t u32; typedef int32_t s32;
 typedef uint64_t u64; typedef int64_t s64;
 
+// The differential renderer owns a second framebuffer image. Observe guest
+// writes there, including writes that repeat the reference's current value.
+// Production builds retain their direct store mappings and have no callbacks.
+#ifdef RDP_ORACLE
+void rdp_oracle_cpu_write(u32 pa, u32 value, u32 mask);
+void rdp_oracle_dma_write(u32 pa, u32 len);
+#define CPU_WRITE_MAP(h) ((void)(h), (uintptr_t)0)
+#define RDP_CPU_WRITE(pa, v, mask) rdp_oracle_cpu_write(pa, v, mask)
+#define RDP_DMA_WRITE(pa, len) rdp_oracle_dma_write(pa, len)
+#else
+#define CPU_WRITE_MAP(h) (h)
+#define RDP_CPU_WRITE(pa, v, mask) ((void)0)
+#define RDP_DMA_WRITE(pa, len) ((void)(pa), (void)(len))
+#endif
+
 #define likely(x)   __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define NOINLINE __attribute__((noinline))

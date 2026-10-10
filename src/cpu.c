@@ -21,7 +21,7 @@ static void map_range(u32 va, u32 size, u32 pa, int valid, int dirty) {
     if (page >= 0x80000 && page < 0xC0000) continue;   // never touch kseg0/kseg1
     if (valid && p < sys.rdram_size) {
       map_r[page] = gpu_stale_pg[p >> 12] ? 0 : (uintptr_t)(rdram + p);
-      map_w[page] = (dirty && !gpu_watch[p >> 12]) ? (uintptr_t)(rdram + p) : 0;
+      map_w[page] = (dirty && !gpu_watch[p >> 12]) ? CPU_WRITE_MAP((uintptr_t)(rdram + p)) : 0;
     } else {
       map_r[page] = 0; map_w[page] = 0;
     }
@@ -807,8 +807,8 @@ void cpu_reset(void) {
   memset(map_r, 0, sizeof map_r); memset(map_w, 0, sizeof map_w);
   for (u32 p = 0; p < sys.rdram_size; p += 0x1000) {
     uintptr_t h = (uintptr_t)(rdram + p);
-    map_r[(0x80000000u + p) >> 12] = h; map_w[(0x80000000u + p) >> 12] = h;
-    map_r[(0xA0000000u + p) >> 12] = h; map_w[(0xA0000000u + p) >> 12] = h;
+    map_r[(0x80000000u + p) >> 12] = h; map_w[(0x80000000u + p) >> 12] = CPU_WRITE_MAP(h);
+    map_r[(0xA0000000u + p) >> 12] = h; map_w[(0xA0000000u + p) >> 12] = CPU_WRITE_MAP(h);
   }
 }
 
@@ -825,7 +825,7 @@ void cpu_watch_page(u32 pg, int on) {
   u32 p = pg << 12;
   uintptr_t h = on ? 0 : (uintptr_t)(rdram + p);
   if (p >= sys.rdram_size) return;
-  map_w[(0x80000000u + p) >> 12] = h; map_w[(0xA0000000u + p) >> 12] = h;
+  map_w[(0x80000000u + p) >> 12] = CPU_WRITE_MAP(h); map_w[(0xA0000000u + p) >> 12] = CPU_WRITE_MAP(h);
 }
 
 void cpu_poll_irq(void) { cpu_take_irq(); }

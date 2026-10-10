@@ -853,7 +853,8 @@ fn shade_and_blend(P: u32, SP: u32, x: i32, y: i32) {
   }
 
   if (is_copy) {
-    let texel = sample_texture_copy(TS + (setup_tile & 7u) * 8u, TM, stv[0].x, stv[0].y, s_offset, tlut);
+    let st = clamp(stv[0], vec2<i32>(-0x8000), vec2<i32>(0x7FFF));
+    let texel = sample_texture_copy(TS + (setup_tile & 7u) * 8u, TM, st.x, st.y, s_offset, tlut);
     if ((sflags & RS_ALPHA_TEST) != 0u && U.fb_size == 2u && (texel & 1) == 0) { return; }
     copy_pipeline(u32(texel));
     return;
@@ -887,7 +888,10 @@ fn shade_and_blend(P: u32, SP: u32, x: i32, y: i32) {
   let sample_quad = (sflags & RS_SAMPLE_QUAD) != 0u; let mid_texel = (sflags & RS_MID_TEXEL) != 0u;
   let convert_one = (sflags & RS_CONVERT_ONE) != 0u; let bilerp0 = (sflags & RS_BILERP0) != 0u; let bilerp1 = (sflags & RS_BILERP1) != 0u;
   let uses_t0 = (sflags & RS_USES_TEXEL0) != 0u; let uses_t1 = (sflags & RS_USES_TEXEL1) != 0u || pipelined;
-  var st_a = stv[0]; var st_b = stv[3];       // where texel0 and the pipelined texel1 are sampled
+  // Keep the divider's 17-bit coordinates for LOD; saturate to signed 16-bit
+  // only for texture sampling, before tile shifts can wrap the result.
+  var st_a = clamp(stv[0], vec2<i32>(-0x8000), vec2<i32>(0x7FFF));
+  var st_b = clamp(stv[3], vec2<i32>(-0x8000), vec2<i32>(0x7FFF));
 //#if HD
   // Flat primitives: stay inside the coordinates the primitive samples at native resolution (see st_bounds in rdp.c).
   if ((pflags & PF_ST_CLAMP) != 0u) {

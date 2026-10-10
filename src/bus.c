@@ -176,6 +176,7 @@ static void pi_dma_write(void) {
     if (dram + n > sys.rdram_size) n = dram < sys.rdram_size ? sys.rdram_size - dram : 0;
     if (cart >= 0x10000000 && cart < 0x1FC00000 && !((cart | n) & 3) && cart - 0x10000000 + n <= sys.rom_size) memcpy(rdram + dram, sys.rom + (cart - 0x10000000), n);
     else for (u32 i = 0; i < n; i++) rdram[(dram + i) ^ 3] = cart_read8(cart + i);
+    RDP_DMA_WRITE(dram, n);
     gpu_mark_dirty(dram, n);
     dram = (dram + (u32)length + 7) & ~7u;
     cart += total;
@@ -191,7 +192,12 @@ static void pi_dma_write(void) {
       s32 n = cur_len - misalign;
       if (!(first && cur_len < 127 - misalign)) n = (n + 1) & ~1;
       if (n > 0) gpu_mark_dirty(dram, (u32)n);
+      u32 write_start = dram;
       for (s32 i = 0; i < n; i++) { if (dram < sys.rdram_size) rdram[dram ^ 3] = mem[i]; dram++; }
+      if (n > 0 && write_start < sys.rdram_size) {
+        u32 written = (u32)n < sys.rdram_size - write_start ? (u32)n : sys.rdram_size - write_start;
+        RDP_DMA_WRITE(write_start, written);
+      }
       dram = (dram + 7) & ~7u;
       wrlen = cur_len <= 8 ? 127 - misalign : 127;
       first = 0;
@@ -402,6 +408,7 @@ void bus_write32(u32 pa, u32 v, u32 mask) {
       if (unlikely(gpu_stale_pg[pa >> 12]) && (((mask >> 16) + 1) & 0xFFFE || ((mask & 0xFFFF) + 1) & 0xFFFE) && gpu_range_stale(pa & ~3u, 4)) {
         gpu_request_sync(); cpu_restart = 1; gpu_sync_cause[0] = 2; gpu_sync_cause[1] = pa; gpu_sync_cause[2] = cpu.ipc; return;
       }
+      RDP_CPU_WRITE(pa & ~3u, v, mask);
       u32 *p = &RDRAM32(pa); *p = (*p & ~mask) | (v & mask);
       if (unlikely(gpu_watch[pa >> 12])) { u32 k = (pa & ~3u) >> 1; if (mask >> 16) rdp_hidden[k] |= 0x80; if (mask & 0xFFFF) rdp_hidden[k + 1] |= 0x80; }
     }
@@ -489,6 +496,7 @@ void bus_write32(u32 pa, u32 v, u32 mask) {
         case 1:  // PIF -> RDRAM
           pif_process();
           for (u32 i = 0; i < 64; i++) rdram[((sys.si_dram + i) & (RDRAM_MAX - 1)) ^ 3] = sys.pif[i];
+          RDP_DMA_WRITE(sys.si_dram & (RDRAM_MAX - 1), 64);
           gpu_mark_dirty(sys.si_dram & (RDRAM_MAX - 1), 64);
           si_done(6000);
           break;

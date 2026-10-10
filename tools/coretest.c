@@ -94,6 +94,13 @@ EXPORT(run_tests) u32 run_tests(void) {
   check(shift_coord(0xFFFF, 0, 0) == -1);
   check(shift_coord(0x8000, 0, 0) == -32768);
   check(shift_coord(0x8000, 0, 15) == 0);
+  s32 ps, pt;
+  check(!perspective_divide(-11048, -174, 7016, &ps, &pt));
+  check(ps == -51599 && pt == -813); // preserve 17-bit coordinates for LOD
+  check(texture_coord(ps) == -32768 && texture_coord(pt) == -813);
+  check(texture_coord(32768) == 32767);
+  check(texture_coord(-32769) == -32768);
+  check(texture_coord(32767) == 32767 && texture_coord(-32768) == -32768);
   TriSetup edge = { .dxhdy = 67108863, .dxmdy = 67108863, .dxldy = 67108863, .yl = 1024, .ym = 32 };
   u32 out[8]; span_setup(&edge, 10, out); check(1); // UBSan guards widened edge intermediates.
   return failures;

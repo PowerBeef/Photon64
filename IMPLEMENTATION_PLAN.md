@@ -30,7 +30,7 @@ Initial source: `ab28c09f4b059239c6467cabbe683701cc86ce4b`, matching the attache
 
 ## Next implementation order
 
-1. Investigate actual Angrylion and shipped-reference differences by first failing command/frame; preserve zero-tolerance verdicts and fix source semantics, not expected results.
+1. Implement copy/fill framebuffer row-boundary writes consistently in C and GPU binning: the Mario Kart replay now has 19 residual color differences, traced to an inclusive copy pixel at x=320 writing the next row's x=0. Preserve command ordering and avoid concurrent GPU writes to the same physical halfword. Then isolate Perfect Dark's two-cycle/coverage discrepancies and World Driver's remaining color differences with the corrected guest-write-aware oracle. Keep the shipped screenshot gate and all counted discrepancies failing.
 2. Extend the passing FPU corpus with hardware-derived VR4300 vectors, especially trap/NaN/flush corner cases beyond the independently generated corpus.
 3. Extend passing desktop/mobile-emulated failure tests to allocation failure and more load/home/state permutations. Validate a physical adapter and real mobile browser before claiming device support.
 4. Extend the six recorded gameplay scenarios and profile frame pacing, long tasks, audio underruns, readback costs and memory by scale. Consider workers only after evidence identifies UI-thread stalls.
@@ -42,3 +42,7 @@ Initial source: `ab28c09f4b059239c6467cabbe683701cc86ce4b`, matching the attache
 3. Browser: stop on synchronous presentation errors, release held keyboard/touch input on focus/page loss, suppress hidden-page fields, reject synchronization/reset on lost devices. Hosted desktop/mobile-emulated fault injection covers quota/unavailable storage and presentation recovery; real Dawn destruction covers the device callback.
 4. Games: add Smash match and World Driver Quick Race scripts; extend every local lane to recorded checkpoints and preserve failures. ROM payloads stay local. A scripted segment is not whole-game compatibility.
 5. Performance: conservative wrapped source/target overlap permits larger software batches. VI SIMD candidates matched images but were rejected for inconsistent timing benefits. Compare fixed artifacts, final machine/image/audio hashes and named profiles; shared-host wall time requires qualification.
+
+## Renderer accuracy follow-up
+
+Implemented signed 16-bit saturation between the 17-bit perspective divider and tile coordinate shifts in C/WGSL. LOD retains the wider coordinates. Independent coordinate vectors and guest-store/DMA synchronization tests run in the required native build. The reference adapter observes CPU-owned hidden bits as well as command order; old stale-memory depth counts are superseded. Exact 1x HD comparisons now reject reduced diagnostic storage, which aliases addresses. `VALIDATION_REPORT.md` records same-harness before/after counts and the remaining failures.

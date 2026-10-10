@@ -6,7 +6,7 @@
 static uint8_t alt_rdram[0x800000 + 16] __attribute__((aligned(4096)));
 #define RDP_FB_BASE alt_rdram
 #include "native.c"
-#include "../../ref/angrylion-rdp-plus/src/core/n64video.h"
+#include "n64video.h"
 #include <stdarg.h>
 
 void msg_error(const char *err, ...) { va_list a; va_start(a, err); vfprintf(stderr, err, a); va_end(a); fputc('\n', stderr); }
@@ -29,6 +29,36 @@ static const char *diff_prefix;
 
 static u32 calls, need_resync = 1;
 static u32 reference_commands[1024];
+void photon_reference_cpu_write(unsigned pa, unsigned len);
+static void reference_init(void) {
+  struct n64video_config cfg;
+  n64video_config_init(&cfg);
+  for (int i = 0; i < 8; i++) a_dp_p[i] = &a_dp[i];
+  for (int i = 0; i < 14; i++) a_vi_p[i] = &a_vi[i];
+  cfg.gfx.rdram = rdram; cfg.gfx.rdram_size = RDRAM_MAX; cfg.gfx.dmem = (u8 *)reference_commands;
+  cfg.gfx.vi_reg = a_vi_p; cfg.gfx.dp_reg = a_dp_p; cfg.gfx.mi_intr_reg = &a_mi; cfg.gfx.mi_intr_cb = a_irq;
+  cfg.parallel = false; cfg.num_workers = 1;
+  n64video_init(&cfg);
+}
+void rdp_oracle_cpu_write(u32 pa, u32 value, u32 mask) {
+  if (!need_resync) {
+    rdp_flush();
+    u32 *p = (u32 *)(alt_rdram + pa);
+    *p = (*p & ~mask) | (value & mask);
+  }
+  if (mask >> 16) { rdp_hidden[pa >> 1] |= 0x80; photon_reference_cpu_write(pa, 2); }
+  if (mask & 0xFFFF) { rdp_hidden[(pa >> 1) + 1] |= 0x80; photon_reference_cpu_write(pa + 2, 2); }
+}
+void rdp_oracle_dma_write(u32 pa, u32 len) {
+  if (!len) return;
+  if (!need_resync) rdp_flush();
+  for (u32 i = 0; i < len; i++) {
+    u32 a = (pa + i) & (RDRAM_MAX - 1);
+    if (!need_resync) alt_rdram[a ^ 3] = rdram[a ^ 3];
+    rdp_hidden[a >> 1] |= 0x80;
+  }
+  photon_reference_cpu_write(pa, len);
+}
 // Angrylion renders into the machine's real RDRAM (it is the master); our renderer reads the same
 // commands/textures but renders into alt_rdram. Resync once after each SYNC_FULL.
 static void hook_pre(void) {
@@ -105,14 +135,7 @@ int main(int argc, char **argv) {
   u8 *rom = malloc(sz + 16); if (fread(rom, 1, sz, f) != (size_t)sz) return 1; fclose(f);
   if (!n64_load_rom(rom, sz)) { fprintf(stderr, "bad rom\n"); return 1; }
 
-  struct n64video_config cfg;
-  n64video_config_init(&cfg);
-  for (int i = 0; i < 8; i++) a_dp_p[i] = &a_dp[i];
-  for (int i = 0; i < 14; i++) a_vi_p[i] = &a_vi[i];
-  cfg.gfx.rdram = rdram; cfg.gfx.rdram_size = RDRAM_MAX; cfg.gfx.dmem = (u8 *)reference_commands;
-  cfg.gfx.vi_reg = a_vi_p; cfg.gfx.dp_reg = a_dp_p; cfg.gfx.mi_intr_reg = &a_mi; cfg.gfx.mi_intr_cb = a_irq;
-  cfg.parallel = false; cfg.num_workers = 1;
-  n64video_init(&cfg);
+  reference_init();
   rdp_hook_pre = hook_pre; rdp_hook_post = hook_post; rdp_hook_command = hook_command; rdp_hook_command_post = hook_post;
   int frames = atoi(argv[2]);
   for (int i = 0; i < frames; i++) { apply_inputs(i); n64_run_frame(); }

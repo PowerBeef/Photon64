@@ -27,6 +27,20 @@ Dawn uses the locally installed `webgpu` package. Linux defaults to Mesa lavapip
 
 The GPU predicate compares VI RGB, last-batch framebuffer color/hidden/depth data and three execution counters (PC, RSP instructions, primitive count). Framebuffer inspection first uploads CPU-owned changes to the GPU cache; unused depth addresses otherwise report stale data unrelated to rendering. It does not compare the full CPU/FPU/RSP state. Coverage is written into the result. Missing framebuffer comparisons after rendering fail. Zero-render checkpoints can establish execution agreement but not rendering accuracy. The independent Angrylion lane fails on any counted color/depth mismatch or zero comparisons.
 
+The native oracle disables direct CPU store mappings only in its `RDP_ORACLE` build and observes masked CPU stores plus PI, SI and RSP DMA writes. It materializes queued software drawing before updating the alternate image, preserves untouched bits, and marks CPU-owned hidden bits on both sides through the generated reference adapter. Production builds retain their direct mappings. The required native build also runs `out/oracle_test`: 589824 independently expected texture-coordinate checks and 96 guest-write/order checks. The adapter exposes the pinned reference's perspective divider and sampling clamp only for this test. Both sides zero random bits; this diagnostic policy is not a hardware noise test.
+
+To reproduce the Mario Kart accuracy replay and native/HD-at-1x parity around the repaired pixel:
+
+```sh
+./out/oracle_nn "roms/Mario Kart 64 (USA).z64" 3300 -i "$(cat tools/inputs/mk64.txt)"
+node tools/dawntest.mjs "roms/Mario Kart 64 (USA).z64" 3300 \
+  "1916,2214,2216,3299" "$(cat tools/inputs/mk64.txt)" --window 6
+node tools/dawntest.mjs "roms/Mario Kart 64 (USA).z64" 3300 \
+  "1916,2214,2216,3299" "$(cat tools/inputs/mk64.txt)" --window 6 --hd 0
+```
+
+Set the adapter variables described above first. `--window 6` runs complete paired-core replays, with GPU rendering active only in the six fields leading into each checkpoint; it is not a continuous-GPU replay. Keep the full RDRAM-sized buffer for exact 1x checks. The optional `--hdwords` workaround for restricted adapters introduces address aliasing and must not be used for an exact framebuffer verdict.
+
 Local commercial fixtures belong in ignored `roms/` and are never fetched by setup or CI:
 
 ```sh
