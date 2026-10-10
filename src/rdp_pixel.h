@@ -450,7 +450,7 @@ typedef struct { u32 c_muladd, c_mulsub, c_mul, c_add; s32 shade[4], combined[4]
 #define CB(c) ((s32)(((c) >> 8) & 0xFF))
 #define CA(c) ((s32)((c) & 0xFF))
 
-static inline void combiner_equation(const CombIn *in, u32 sel_rgb, u32 sel_alpha, s32 *out) {
+static inline void combiner_equation(const CombIn *in, u32 sel_rgb, u32 sel_alpha, s32 *out, s32 *key_rgb, s32 *bypass) {
   s32 a[4], b[4], c[4], d[4];
   u32 m;
   // muladd
@@ -524,7 +524,20 @@ static inline void combiner_equation(const CombIn *in, u32 sel_rgb, u32 sel_alph
     s32 aa = sx(a[i] - 0x80, 9) + 0x80, bb = sx(b[i] - 0x80, 9) + 0x80, dd = sx(d[i] - 0x80, 9) + 0x80;
     s32 color = (aa - bb) * cc + 0x80;
     out[i] = (s32)(s16)((color >> 8) + dd);
+    if (i < 3 && key_rgb) { key_rgb[i] = (color + dd * 256) & 0x1FFFF; bypass[i] = a[i]; }
   }
+}
+
+// The key test uses the full 17-bit combiner fraction, including its unusual
+// positive half-step tie. Alpha coverage selection overrides this key alpha.
+static inline s32 chroma_key_alpha(const s32 *raw_rgb, const u32 *width) {
+  s32 alpha = 255;
+  for (int i = 0; i < 3; i++) {
+    s32 k = sx(raw_rgb[i], 17);
+    if (k > 0) k = -k + ((k & 15) == 8 ? 16 : 0);
+    alpha = mini(alpha, (s32)(width[i] << 4) + k);
+  }
+  return maxi(alpha, 0);
 }
 
 // ---- z ----------------------------------------------------------------------
@@ -669,7 +682,7 @@ static inline void alias_depth_to_color(void) {
 // Hidden (9th-bit) state is only meaningful while RDRAM still holds what the RDP wrote; a CPU write
 // replaces it with the replicated LSB, as on hardware.
 static inline u32 hidden_get(u32 idx16) { u32 v = VRAM16(idx16); return HIDDEN_AT(idx16, v); }
-static inline void hidden_set(u32 idx16, u32 h) { rdp_hidden[idx16] = (u8)h; rdp_shadow16[idx16] = VRAM16(idx16); }
+static inline void hidden_set(u32 idx16, u32 h) { rdp_hidden[idx16] = (u8)h | ((rdp_gpu_mode && b_info.fb_fmt < FB_5551) ? 0x40 : 0); rdp_shadow16[idx16] = VRAM16(idx16); }
 
 static inline void px_load(u32 x, u32 y) {
   u32 index = b_info.fb_addr + b_info.fb_width * y + x;
@@ -746,14 +759,22 @@ static inline void fill_color(u32 col) {
     case FB_8888: write_color(col >> 24, (col >> 16) & 0xFF, (col >> 8) & 0xFF, col & 0xFF); break;
     case FB_5551: col >>= ((px_fb_index & 1) ^ 1) * 16; write_color((col >> 8) & 0xF8, (col >> 3) & 0xF8, (col << 2) & 0xF8, (col & 1) * 0xE0); break;
     case FB_IA88: col = (col >> (((px_fb_index & 1) ^ 1) * 16)) & 0xFFFF; write_color(col >> 8, col >> 8, col >> 8, col & 0xFF); break;
-    case FB_I8: col = (col >> (((px_fb_index & 3) ^ 3) * 8)) & 0xFF; write_color(col, col, col, col); break;
+    case FB_I8: // Match the pinned reference's byte-fill shift order (not a hardware claim).
+      col = ((col >> ((px_fb_index & 3) ^ 3)) << 3) & 0xFF; write_color(col, col, col, col); break;
     default: break;
   }
   if (b_info.alias) alias_color_to_depth();
 }
 
+static s32 pipeline_feedback[12];
+u32 gpu_feedback_dirty;
+#define pipeline_combined (pipeline_feedback)
+#define pipeline_memory (pipeline_feedback + 4)
+#define pipeline_pre_memory (pipeline_feedback + 8)
+EXPORT(n64_rdp_feedback) s32 *n64_rdp_feedback(void) { return pipeline_feedback; }
+
 // ---- per-pixel primitive evaluation ---------------------------------------------
-static inline void shade_and_blend(const s32 *P, const u32 *SP, s32 x, s32 y) {
+static inline void shade_and_blend_internal(const s32 *P, const u32 *SP, s32 x, s32 y, int preview_cycle0) {
   const u32 *ST = b_states + (u32)P[P_STATE] * STATE_WORDS;
   u32 sflags = ST[S_FLAGS];
   u32 setup_flags = (u32)P[P_FLAGS] & 0xFF, setup_tile = ((u32)P[P_FLAGS] >> 8) & 0xFF;
@@ -803,15 +824,14 @@ static inline void shade_and_blend(const s32 *P, const u32 *SP, s32 x, s32 y) {
     return;
   }
 
-  u32 coverage = compute_coverage(SP, x);
-  if (coverage == 0) return;
+  u32 coverage = preview_cycle0 ? 0 : compute_coverage(SP, x);
   s32 coverage_count = __builtin_popcount(coverage);
   int aa_enable = (sflags & RS_AA) != 0;
-  if (!aa_enable && (coverage & 1) == 0) return;
+  int coverage_pass = aa_enable ? coverage != 0 : (coverage & 1) != 0;
 
   s32 dx = x - base_x;
   s32 dir = flip ? 1 : -1;
-  s32 first = lsb(coverage);
+  s32 first = coverage ? lsb(coverage) : 0;
   s32 yoff = first >> 1, xoff = ((first & 1) << 1) + (yoff & 1);
 
   // shade
@@ -909,15 +929,16 @@ static inline void shade_and_blend(const s32 *P, const u32 *SP, s32 x, s32 y) {
   int cvg_times_alpha = (sflags & RS_CVG_TIMES_ALPHA) != 0, alpha_cvg_select = (sflags & RS_ALPHA_CVG_SELECT) != 0;
   int alpha_test = (sflags & RS_ALPHA_TEST) != 0;
   CombIn in;
-  s32 combined[4];
+  s32 combined[4], key_rgb[3], bypass[3];
   s32 alpha_reference = 0;
-  for (int i = 0; i < 4; i++) { in.shade[i] = shade[i]; in.combined[i] = 0; in.texel0[i] = texel0[i]; in.texel1[i] = texel1[i]; }
+  for (int i = 0; i < 4; i++) { in.shade[i] = shade[i]; in.combined[i] = pipeline_combined[i]; in.texel0[i] = texel0[i]; in.texel1[i] = texel1[i]; }
   in.lod_frac = lod_frac;
   in.noise = (s32)(((px_noise & 7) << 6) | 0x20);
   if (sflags & RS_MULTI_CYCLE) {
     in.c_muladd = P[P_CONST + 0]; in.c_mulsub = P[P_CONST + 1]; in.c_mul = P[P_CONST + 2]; in.c_add = P[P_CONST + 3];
     s32 c0[4];
-    combiner_equation(&in, ST[S_RGB0], ST[S_ALPHA0], c0);
+    combiner_equation(&in, ST[S_RGB0], ST[S_ALPHA0], c0, NULL, NULL);
+    if (preview_cycle0) { for (int i = 0; i < 4; i++) pipeline_combined[i] = c0[i] & 511; return; }
     if (alpha_test) {
       s32 ca = clamp9(c0[3]);
       s32 ea = ca + ((ca + 1) >> 8);
@@ -931,26 +952,28 @@ static inline void shade_and_blend(const s32 *P, const u32 *SP, s32 x, s32 y) {
   } else {
     in.c_muladd = P[P_CONST + 4]; in.c_mulsub = P[P_CONST + 5]; in.c_mul = P[P_CONST + 6]; in.c_add = P[P_CONST + 7];
   }
-  combiner_equation(&in, ST[S_RGB1], ST[S_ALPHA1], combined);
+  combiner_equation(&in, ST[S_RGB1], ST[S_ALPHA1], combined, (sflags & RS_KEY) ? key_rgb : NULL, (sflags & RS_KEY) ? bypass : NULL);
 #ifdef RDP_DEBUG
   if (rdp_dbg_on && x == rdp_dbg_x && y == rdp_dbg_y)
     printf("   [mine] seq %d texel0=%d,%d,%d,%d texel1=%d,%d,%d,%d comb=%d,%d,%d,%d out=%d,%d,%d,%d shade=%d,%d,%d,%d cvg=%d\n", P[P_SEQ], texel0[0], texel0[1], texel0[2], texel0[3], texel1[0], texel1[1], texel1[2], texel1[3],
       in.combined[0], in.combined[1], in.combined[2], in.combined[3], combined[0], combined[1], combined[2], combined[3], shade[0], shade[1], shade[2], shade[3], coverage_count);
 #endif
-  for (int i = 0; i < 4; i++) combined[i] = clamp9(combined[i]);
+  for (int i = 0; i < 4; i++) { pipeline_combined[i] = combined[i] & 0x1FF; combined[i] = clamp9(combined[i]); }
+  s32 key_alpha = (sflags & RS_KEY) ? chroma_key_alpha(key_rgb, ST + S_KEY_R) : 0;
+  if (sflags & RS_KEY) for (int i = 0; i < 3; i++) combined[i] = clamp9(bypass[i]);
   {
     s32 ea = combined[3] + ((combined[3] + 1) >> 8), ma;
     if (cvg_times_alpha) { ma = (ea * coverage_count + 4) >> 3; coverage_count = ma >> 5; }
     else ma = coverage_count << 5;
-    if (alpha_cvg_select) ea = ma; else ea += alpha_dith;
+    if (alpha_cvg_select) ea = ma; else if (sflags & RS_KEY) ea = key_alpha; else ea += alpha_dith;
     combined[3] = clampi(ea, 0, 0xFF);
   }
   if (!(sflags & RS_MULTI_CYCLE)) alpha_reference = combined[3];
 
-  if (aa_enable && coverage_count == 0) return;
+  int alpha_pass = 1;
   if (alpha_test) {
     s32 threshold = (sflags & RS_ALPHA_TEST_DITHER) ? (s32)(px_noise & 0xFF) : CA((u32)P[P_BLEND]);
-    if (alpha_reference < threshold) return;
+    if (alpha_reference < threshold) alpha_pass = 0;
   }
   s32 shade_alpha = mini(shade[3] + alpha_dith, 0xFF);
 
@@ -967,7 +990,16 @@ static inline void shade_and_blend(const s32 *P, const u32 *SP, s32 x, s32 y) {
     case FB_IA88: memory[0] = memory[1] = memory[2] = px_color[0]; break;
     default: memory[0] = px_color[0]; memory[1] = px_color[1]; memory[2] = px_color[2]; break;
   }
+  if (!image_read && b_info.fb_fmt != FB_I4) {
+    const s32 *retained = (db & DB_MULTI_CYCLE) ? pipeline_pre_memory : pipeline_memory;
+    for (int i = 0; i < 3; i++) memory[i] = retained[i];
+  }
   memory[3] = memory_coverage;
+  if (db & DB_MULTI_CYCLE) memcpy(pipeline_pre_memory, memory, 4 * sizeof(s32));
+  s32 previous_memory[4];
+  memcpy(previous_memory, pipeline_memory, sizeof previous_memory);
+  memcpy(pipeline_memory, memory, 4 * sizeof(s32));
+  if (!coverage_pass || !alpha_pass || (aa_enable && coverage_count == 0)) return;
   s32 mem_cov = memory_coverage >> 5;
   int blend_en, coverage_wrap; s32 shift_x, shift_y;
   s32 dz = dzw & 0xFFFF, dzc = (dzw >> 16) & 0xFF;
@@ -977,7 +1009,7 @@ static inline void shade_and_blend(const s32 *P, const u32 *SP, s32 x, s32 y) {
     s32 pixel[4] = { combined[0], combined[1], combined[2], combined[3] }, rgb[3];
     u32 modes = ST[S_BLEND0];
     if (db & DB_MULTI_CYCLE) {
-      blender(pixel, memory, (u32)P[P_FOG], (u32)P[P_BLEND], shade_alpha, modes, force_blend, blend_en, color_on_cvg, coverage_wrap, shift_x, shift_y, 0, rgb);
+      blender(pixel, previous_memory, (u32)P[P_FOG], (u32)P[P_BLEND], shade_alpha, modes, force_blend, blend_en, color_on_cvg, coverage_wrap, shift_x, shift_y, 0, rgb);
       pixel[0] = rgb[0]; pixel[1] = rgb[1]; pixel[2] = rgb[2];
       modes = ST[S_BLEND1];
     }
@@ -992,6 +1024,9 @@ static inline void shade_and_blend(const s32 *P, const u32 *SP, s32 x, s32 y) {
   }
 }
 
+static inline void shade_and_blend(const s32 *P, const u32 *SP, s32 x, s32 y) {
+  shade_and_blend_internal(P, SP, x, y, 0);
+}
 static void sw_render_batch(void) {
   for (u32 i = 0; i < b_info.num_prims; i++) {
     const s32 *P = b_prims + i * PRIM_WORDS;
@@ -1000,8 +1035,9 @@ static void sw_render_batch(void) {
     for (s32 y = ylo; y <= yhi; y++, SP += SPAN_WORDS) {
       if (!(SP[7] & 1)) continue;
       s32 start_x = SP[4] & 0xFFFF, end_x = SP[4] >> 16;
-      if (end_x >= (s32)b_info.fb_width) end_x = b_info.fb_width - 1;
-      for (s32 x = start_x; x <= end_x; x++) {
+      int flip = (P[P_FLAGS] & SETUP_FLIP) != 0;
+      s32 step = flip ? 1 : -1;
+      for (s32 x = flip ? start_x : end_x; x >= start_x && x <= end_x; x += step) {
         px_load(x, y);
 #ifdef RDP_DEBUG   // (test tools: which primitives touch one pixel, with their state)
         s32 dbg_before[4] = { px_color[0], px_color[1], px_color[2], px_color[3] };
@@ -1019,6 +1055,14 @@ static void sw_render_batch(void) {
 #endif
         px_store(x, y);
       }
+    }
+    const u32 *ST = b_states + (u32)P[P_STATE] * STATE_WORDS;
+    if ((ST[S_FLAGS] & RS_MULTI_CYCLE) && P[P_TAIL] >= 0) {
+      s32 x = P[P_TAIL] & 65535, y = (u32)P[P_TAIL] >> 16;
+      const u32 *tail = b_spans + ((u32)P[P_SPAN] + y - P[P_YLO]) * SPAN_WORDS;
+      // The two-cycle pipeline leaves cycle zero of the following (unwritten)
+      // sample in COMBINED, including zero coverage at the primitive boundary.
+      shade_and_blend_internal(P, tail, x + ((P[P_FLAGS] & SETUP_FLIP) ? 1 : -1), y, 1);
     }
   }
 }

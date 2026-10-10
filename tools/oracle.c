@@ -30,6 +30,34 @@ static const char *diff_prefix;
 static u32 calls, need_resync = 1;
 static u32 reference_commands[1024];
 void photon_reference_cpu_write(unsigned pa, unsigned len);
+unsigned photon_reference_hidden(unsigned pa);
+static u8 touched[RDRAM_MAX / 2], touched_page[RDRAM_MAX / 4096];
+static unsigned long long touched_words, touched_color_bad, touched_depth_bad, touched_hidden_bad;
+void rdp_oracle_touch(u32 pa, u32 len, u32 depth) {
+  for (u32 i = 0; i < len; i++) {
+    u32 a = (pa + i) & (RDRAM_MAX - 1);
+    touched_page[a >> 12] = 1;
+    touched[a >> 1] |= depth ? 4 : 1u << (a & 1);
+  }
+}
+static void compare_touched(void) {
+  u32 cbad = 0, zbad = 0, hbad = 0, words = 0;
+  for (u32 k = 0; k < RDRAM_MAX / 2; k++) {
+    if (!(k & 2047) && !touched_page[k >> 11]) { k += 2047; continue; }
+    u32 flags = touched[k]; if (!flags) continue;
+    u32 a = k * 2, m = *(u16 *)(mine + (a ^ 2)), r = *(u16 *)(ref_rdram + (a ^ 2));
+    u32 mask = ((flags & 1) ? 0xFF00 : 0) | ((flags & 2) ? 255 : 0);
+    cbad += ((m ^ r) & mask) != 0;
+    zbad += (flags & 4) && m != r;
+    hbad += HIDDEN_AT(k, m) != photon_reference_hidden(a);
+    words++;
+    touched[k] = 0;
+  }
+  if (verbose == 1 || cbad || zbad || hbad)
+    printf("touched frame %d: %u halfwords, color=%u depth=%u hidden=%u differences\n", frame_no, words, cbad, zbad, hbad);
+  memset(touched_page, 0, sizeof touched_page);
+  touched_words += words; touched_color_bad += cbad; touched_depth_bad += zbad; touched_hidden_bad += hbad;
+}
 static void reference_init(void) {
   struct n64video_config cfg;
   n64video_config_init(&cfg);
@@ -83,6 +111,7 @@ static void compare(void) {
   for (u32 i = 0; i < n; i++) {
     u32 x, y;
     if (rdp.fb_fmt == FB_8888) { x = *(u32 *)(mine + ((addr + i * 4) & (RDRAM_MAX - 4))); y = *(u32 *)(ref_rdram + ((addr + i * 4) & (RDRAM_MAX - 4))); }
+    else if (rdp.fb_fmt < FB_5551) { x = mine[((addr + i) & (RDRAM_MAX - 1)) ^ 3]; y = ref_rdram[((addr + i) & (RDRAM_MAX - 1)) ^ 3]; }
     else { u32 o = ((addr + i * 2) & (RDRAM_MAX - 2)) ^ 2; x = *(u16 *)(mine + o); y = *(u16 *)(ref_rdram + o); }
         if (dump_diffs && w <= 320 && i < 320 * 480) {   // side by side: mine | ref | diff
       u32 px = i % w, py = i / w; u8 *p = img + (py * 960 + px) * 4, *q = p + 320 * 4, *d = q + 320 * 4;
@@ -102,6 +131,7 @@ static void compare(void) {
     u32 zo = ((rdp.z_addr + i * 2) & (RDRAM_MAX - 2)) ^ 2;
     if (*(u16 *)(mine + zo) != *(u16 *)(ref_rdram + zo)) { if (zbad < 6 && verbose > 1) printf("   z diff at (%u,%u): mine=%04x ref=%04x\n", i % w, i / w, *(u16 *)(mine + zo), *(u16 *)(ref_rdram + zo)); zbad++; }
   }
+  compare_touched();
   tot_px += n; tot_bad += bad; tot_zbad += zbad; tot_big += nbig; if (nbig) frames_big++;
   if (verbose == 1 || bad || zbad) printf("frame %d (vi %u): fb=%06x %ux%u fmt=%u  color mismatches=%u (%.3f%%, %u big)  z mismatches=%u\n", frame_no, sys.frames, addr, w, h, rdp.fb_fmt, bad, 100.0 * bad / (n ? n : 1), nbig, zbad);
   if (dump_diffs && bad && diff_prefix) { char path[256]; snprintf(path, sizeof path, "%s%05d.png", diff_prefix, frame_no); png_write(path, img, 960, h); }
@@ -143,5 +173,7 @@ int main(int argc, char **argv) {
   printf("colour differences larger than one dither step: %llu pixels in %d frames\n", tot_big, frames_big);
   printf("TOTAL: %d rdp frames, %llu pixels, %llu color mismatches (%.5f%%), %llu z mismatches (%.5f%%)\n", frame_no, tot_px, tot_bad,
          100.0 * tot_bad / (tot_px ? tot_px : 1), tot_zbad, 100.0 * tot_zbad / (tot_px ? tot_px : 1));
-  return !frame_no || !tot_px || tot_bad || tot_zbad;
+  printf("TOUCHED: %llu halfwords, %llu color, %llu depth, %llu hidden mismatches\n",
+         touched_words, touched_color_bad, touched_depth_bad, touched_hidden_bad);
+  return !frame_no || !tot_px || tot_bad || tot_zbad || touched_color_bad || touched_depth_bad || touched_hidden_bad;
 }

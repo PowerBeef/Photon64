@@ -15,6 +15,7 @@ static void setup(u32 op) {
   cpu.next_ev = cpu.cycles + cpu.cpi;
 }
 #include "fpu_vectors.h"
+#include "rdp_vectors.h"
 #define OP(fn) ((8u << 21) | (9u << 16) | (10u << 11) | (fn))
 EXPORT(run_tests) u32 run_tests(void) {
   checks = failures = first_failure = 0;
@@ -94,6 +95,22 @@ EXPORT(run_tests) u32 run_tests(void) {
   check(shift_coord(0xFFFF, 0, 0) == -1);
   check(shift_coord(0x8000, 0, 0) == -32768);
   check(shift_coord(0x8000, 0, 15) == 0);
+  // These authored RDP vectors run under ASan/UBSan and both WASM optimizer
+  // levels as well as the independent oracle and actual WGSL vector runner.
+  memset(rdram, 0, RDRAM_MAX); rdp_reset(); rdp_gpu_mode = 0;
+  for (u32 i = 0; i < sizeof renderer_vectors / sizeof *renderer_vectors; i++) rdp_exec(renderer_vectors[i]);
+  rdp_flush();
+  check(VRAM16(0x8000 / 2 + 8) == 0xF801); // logical X=4 aliases next row
+  check(pipeline_combined[3] == 255);
+  check(b_info.num_prims == 0);
+  // A software fallback can change hidden bits while repeating the same data.
+  // Its upload must preserve RDP hidden bits rather than apply the CPU LSB rule.
+  rdp_gpu_mode = 1; b_info.fb_fmt = FB_I8;
+  VRAM16(0x40000) = gpu_shadow16[0x40000] = 0;
+  hidden_set(0x40000, 3); check(hidden_get(0x40000) == 3);
+  check(n64_sync_scan(0x40000, 1) == 1);
+  check(sync_stage[0] == (0x80000000u | (3u << 16)));
+  rdp_gpu_mode = 0;
   s32 ps, pt;
   check(!perspective_divide(-11048, -174, 7016, &ps, &pt));
   check(ps == -51599 && pt == -813); // preserve 17-bit coordinates for LOD

@@ -17,14 +17,16 @@ jobs:
           python-version: '3.12'
       - run: tools/setup.sh
       - run: npm run validate
-      - name: Compare shipped reference screenshots
-        run: .venv/bin/python tools/cmp_ref.py testroms 120
+      - name: Record legacy mixed-stage screenshot diagnostic
+        continue-on-error: true
+        run: set -o pipefail; .venv/bin/python tools/cmp_ref.py testroms 120 | tee out/legacy-reference-diagnostic.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: validation-evidence
           path: |
             out/homebrew.json
+            out/legacy-reference-diagnostic.log
             out/photon64.html
   browser:
     runs-on: ubuntu-24.04

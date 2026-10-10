@@ -1,10 +1,12 @@
 # Remaining accuracy investigation
 
+**Implementation follow-up:** the five prioritized items are now implemented. See `RENDERER_ACCURACY_IMPLEMENTATION.md` and the latest section of `VALIDATION_REPORT.md`. The traces, counts and proposed implementations below describe the earlier investigation baseline and remain historical evidence.
+
 Investigated 10 October 2026 against Photon64 `0b499b1c318ad7ca317d4f13046427f29df4c2a6` (tree `7f0d4880230b3611623494cf4cd01b4f88465f24`). Production renderer/core semantics were not changed during this investigation. The external oracle remains pinned to Angrylion RDP Plus `9c8b9ed3e7d7f00dff8bc872ccdd3fba1a3673fc`; temporary instrumentation and explicitly altered diagnostic references are generated outside tracked source.
 
 The remaining failures have different causes: framebuffer row aliasing, differences in pipeline feedback, and a screenshot gate comparing raw framebuffer references with VI scanout. They should not be treated as one texture-coordinate or random-dither problem. This report establishes specific reference discrepancies, not hardware certification or attribution of every residual pixel.
 
-## Current measured baseline
+## Investigation baseline (superseded)
 
 These completed replays use the standard guest-write-aware, noise-zero diagnostic oracle from the preceding renderer pass. They are not stock-reference or hardware captures. Fresh shorter replays below reproduce the earliest remaining differences. Counts are cumulative across compared RDP frames, not unique screen locations; VI fields and RDP frames are different counters.
 

@@ -8,7 +8,7 @@ struct Batch {
   depth_addr: u32, fb_size: u32, dx_shift: u32, dx_mask: u32,
   num_prims: u32, num_spans: u32, num_states: u32, num_tilesets: u32,
   num_tmem: u32, fb_alias: u32, rdram_mask: u32, z_use: u32,
-  tiles_x: u32, ntiles: u32, bins_words: u32, pad2: u32,
+  tiles_x: u32, ntiles: u32, bins_words: u32, ordered: u32,
 };
 @group(0) @binding(0) var<uniform> U: Batch;
 @group(0) @binding(1) var<storage, read_write> fb: array<u32>;
@@ -17,6 +17,12 @@ struct Batch {
 @group(0) @binding(4) var<storage, read> tables: array<u32>;
 @group(0) @binding(5) var<storage, read> tmem: array<u32>;
 @group(0) @binding(6) var<storage, read> bins: array<u32>;
+@group(0) @binding(7) var<storage, read_write> feedback: array<i32>;
+var<private> pipeline_combined: vec4<i32>;
+var<private> pipeline_memory: vec4<i32>;
+var<private> pipeline_pre_memory: vec4<i32>;
+var<private> key_rgb: vec3<i32>;
+var<private> key_bypass: vec3<i32>;
 
 // One source, two pipelines. The native pass is bit-exact and feeds emulated memory. With HD defined the same
 // pipeline rasterizes every primitive again at 2^HL times the resolution into a separate, display-only copy of
@@ -35,7 +41,7 @@ const P_FLAGS = 0u; const P_SPAN = 1u; const P_YLO = 2u; const P_YHI = 3u; const
 const P_TILESET = 6u; const P_SEQ = 7u; const P_RGBA = 8u; const P_DRGBA_DX = 12u; const P_DRGBA_DE = 16u;
 const P_DRGBA_DY = 20u; const P_STZW = 24u; const P_DSTZW_DX = 28u; const P_DSTZW_DE = 32u; const P_DSTZW_DY = 36u;
 const P_CONST = 40u; const P_FOG = 48u; const P_BLEND = 49u; const P_FILL = 50u; const P_DZ = 51u; const P_CONV0 = 52u;
-const P_CONV1 = 53u; const P_YBASE = 54u;
+const P_CONV1 = 53u; const P_YBASE = 54u; const P_TAIL = 55u;
 const P_XH = 56u; const P_XM = 57u; const P_XL = 58u; const P_DXHDY = 59u; const P_DXMDY = 60u; const P_DXLDY = 61u;
 const P_YH = 62u; const P_YM = 63u; const P_YL = 64u; const P_SCX = 65u; const P_SCY = 66u; const P_STLO = 67u; const P_STHI = 69u;
 const T_STATES = 0u; const T_TILES = 8192u; const T_LUT = 73728u; const T_PERSP = 81920u; const T_DITHER = 82048u;
@@ -52,6 +58,7 @@ const RS_SHARPEN = 1024u; const RS_DETAIL = 2048u; const RS_FILL = 4096u; const 
 const RS_ALPHA_TEST = 32768u; const RS_ALPHA_TEST_DITHER = 65536u; const RS_MID_TEXEL = 131072u; const RS_USES_TEXEL0 = 262144u;
 const RS_USES_TEXEL1 = 524288u; const RS_USES_LOD = 1048576u; const RS_USES_PIPELINED_TEXEL1 = 2097152u;
 const RS_CONVERT_ONE = 4194304u; const RS_BILERP0 = 8388608u; const RS_BILERP1 = 16777216u; const RS_NOISE_DUAL = 33554432u;
+const RS_KEY = 67108864u;
 const RS_NOISE = 268435456u;
 const DB_DEPTH_TEST = 1u; const DB_DEPTH_UPDATE = 2u; const DB_FORCE_BLEND = 8u; const DB_IMAGE_READ = 16u;
 const DB_COLOR_ON_CVG = 32u; const DB_MULTI_CYCLE = 64u; const DB_AA = 128u; const DB_DITHER = 256u;
@@ -557,6 +564,8 @@ fn combiner_equation(sel_rgb: u32, sel_alpha: u32) -> vec4<i32> {
   let bb = extractBits(b - vec4<i32>(0x80), 0u, 9u) + vec4<i32>(0x80);
   let dd = extractBits(d - vec4<i32>(0x80), 0u, 9u) + vec4<i32>(0x80);
   let color = (aa - bb) * cc + vec4<i32>(0x80);
+  key_rgb = (color.xyz + dd.xyz * vec3<i32>(256)) & vec3<i32>(0x1FFFF);
+  key_bypass = a.xyz;
   return extractBits((color >> vec4<u32>(8u)) + dd, 0u, 16u);
 }
 
@@ -767,7 +776,7 @@ fn attr_base(P: u32, base: u32, de_off: u32, dy_off: u32, dx_off: u32, dy: i32, 
 
 // x, y: pixel at the rendering resolution; SP: this line's emulated-resolution span record (the span actually used
 // is in the sp_* globals)
-fn shade_and_blend(P: u32, SP: u32, x: i32, y: i32) {
+fn shade_and_blend(P: u32, SP: u32, x: i32, y: i32, preview_cycle0: bool) {
   let ST = T_STATES + u32(prims[P + P_STATE]) * 16u;
   let sflags = tables[ST];
   let pflags = u32(prims[P + P_FLAGS]);
@@ -791,12 +800,13 @@ fn shade_and_blend(P: u32, SP: u32, x: i32, y: i32) {
   let flip = (setup_flags & SETUP_FLIP) != 0u;
   let dir = select(-1, 1, flip);
   let aa_enable = (sflags & RS_AA) != 0u;
+  var coverage_pass = true;
   var coverage_count = 0; var xoff = 0; var yoff = 0;
   if (!is_copy) {
-    let coverage = compute_coverage(x);
-    if (coverage == 0u || (!aa_enable && (coverage & 1u) == 0u)) { return; }
+    let coverage = select(compute_coverage(x), 0u, preview_cycle0);
+    coverage_pass = select((coverage & 1u) != 0u, coverage != 0u, aa_enable);
     coverage_count = i32(countOneBits(coverage));
-    let first = i32(firstTrailingBit(coverage));
+    let first = select(0, i32(firstTrailingBit(coverage)), coverage != 0u);
     yoff = first >> 1u; xoff = ((first & 1) << 1u) + (yoff & 1);
   }
 
@@ -931,7 +941,7 @@ fn shade_and_blend(P: u32, SP: u32, x: i32, y: i32) {
   let cvg_times_alpha = (sflags & RS_CVG_TIMES_ALPHA) != 0u; let alpha_cvg_select = (sflags & RS_ALPHA_CVG_SELECT) != 0u;
   let alpha_test = (sflags & RS_ALPHA_TEST) != 0u;
   let multi = (sflags & RS_MULTI_CYCLE) != 0u;
-  inp.shade = shade; inp.combined = vec4<i32>(0); inp.texel0 = tex[0]; inp.texel1 = tex[1]; inp.lod_frac = lod_frac;
+  inp.shade = shade; inp.combined = pipeline_combined; inp.texel0 = tex[0]; inp.texel1 = tex[1]; inp.lod_frac = lod_frac;
   inp.noise = i32(((px_noise & 7u) << 6u) | 0x20u);
   var alpha_reference = 0;
   var combined = vec4<i32>(0);
@@ -940,6 +950,7 @@ fn shade_and_blend(P: u32, SP: u32, x: i32, y: i32) {
     inp.c_muladd = u32(prims[cb]); inp.c_mulsub = u32(prims[cb + 1u]); inp.c_mul = u32(prims[cb + 2u]); inp.c_add = u32(prims[cb + 3u]);
     let o = combiner_equation(tables[ST + 1u + c * 2u], tables[ST + 2u + c * 2u]);
     if (c == 0u) {
+      if (preview_cycle0) { pipeline_combined = o & vec4<i32>(511); return; }
       if (alpha_test) {
         let cal = clamp9(o.w);
         var ea = cal + ((cal + 1) >> 8u);
@@ -951,22 +962,33 @@ fn shade_and_blend(P: u32, SP: u32, x: i32, y: i32) {
       if ((sflags & RS_NOISE_DUAL) != 0u) { reseed_noise(u32(x + 1023), u32(y + 7), seq + 11u); inp.noise = i32(((px_noise & 7u) << 6u) | 0x20u); }
     } else { combined = o; }
   }
+  pipeline_combined = combined & vec4<i32>(511);
   combined = clamp(extractBits(combined - vec4<i32>(0x80), 0u, 9u) + vec4<i32>(0x80), vec4<i32>(0), vec4<i32>(0xFF));
+  var key_alpha = 255;
+  if ((sflags & RS_KEY) != 0u) {
+    for (var i = 0u; i < 3u; i++) {
+      var k = sx(key_rgb[i], 17u);
+      if (k > 0) { k = -k + select(0, 16, (k & 15) == 8); }
+      key_alpha = min(key_alpha, i32(tables[ST + 10u + i] << 4u) + k);
+      combined[i] = clamp9(key_bypass[i]);
+    }
+    key_alpha = max(key_alpha, 0);
+  }
   {
     var ea = combined.w + ((combined.w + 1) >> 8u);
     var ma: i32;
     if (cvg_times_alpha) { ma = (ea * coverage_count + 4) >> 3u; coverage_count = ma >> 5u; }
     else { ma = coverage_count << 5u; }
-    if (alpha_cvg_select) { ea = ma; } else { ea += alpha_dith; }
+    if (alpha_cvg_select) { ea = ma; } else if ((sflags & RS_KEY) != 0u) { ea = key_alpha; } else { ea += alpha_dith; }
     combined.w = clamp(ea, 0, 0xFF);
   }
   if (!multi) { alpha_reference = combined.w; }
 
-  if (aa_enable && coverage_count == 0) { return; }
+  var alpha_pass = true;
   let blendc = u32(prims[P + P_BLEND]);
   if (alpha_test) {
     let threshold = select(ca(blendc), i32(px_noise & 0xFFu), (sflags & RS_ALPHA_TEST_DITHER) != 0u);
-    if (alpha_reference < threshold) { return; }
+    if (alpha_reference < threshold) { alpha_pass = false; }
   }
   let shade_alpha = min(shade.w + alpha_dith, 0xFF);
 
@@ -979,6 +1001,11 @@ fn shade_and_blend(P: u32, SP: u32, x: i32, y: i32) {
   if (U.fb_fmt == FB_5551) { memory = vec4<i32>(px_color.xyz & vec3<i32>(0xF8), memory_coverage); }
   else if (U.fb_fmt == FB_IA88) { memory = vec4<i32>(px_color.xxx, memory_coverage); }
   else { memory = vec4<i32>(px_color.xyz, memory_coverage); }
+  if (!image_read) { memory = vec4<i32>(select(pipeline_memory.xyz, pipeline_pre_memory.xyz, multi), memory_coverage); }
+  if (multi) { pipeline_pre_memory = memory; }
+  let previous_memory = pipeline_memory;
+  pipeline_memory = memory;
+  if (!coverage_pass || !alpha_pass || (aa_enable && coverage_count == 0)) { return; }
   let mem_cov = memory_coverage >> 5u;
   let dz = i32(dzw & 0xFFFFu); let dzc = i32((dzw >> 16u) & 0xFFu);
   let cvgz = tables[ST + 9u];
@@ -990,7 +1017,7 @@ fn shade_and_blend(P: u32, SP: u32, x: i32, y: i32) {
     var rgb = vec3<i32>(0);
     let first_cycle = select(1u, 0u, (db & DB_MULTI_CYCLE) != 0u);
     for (var c = first_cycle; c < 2u; c++) {
-      let r = blender(pixel, memory, fog, blendc, shade_alpha, tables[ST + 7u + c - first_cycle], force_blend, dr.blend_en, color_on_cvg,
+      let r = blender(pixel, select(previous_memory, memory, c == 1u), fog, blendc, shade_alpha, tables[ST + 7u + c - first_cycle], force_blend, dr.blend_en, color_on_cvg,
                       dr.coverage_wrap, dr.shift_x, dr.shift_y, c == 1u);
       if (c == 0u) { pixel = vec4<i32>(r, pixel.w); } else { rgb = r; }
     }
@@ -1020,6 +1047,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   if (count == 0u || gid.x >= (U.fb_width << HL) || gid.y >= (U.fb_height << HL)) { return; }
   let x = i32(gid.x); let y = i32(gid.y);
   let xn = x >> HL; let yn = y >> HL;
+  load_feedback();
   px_noise = 0u;
   px_load(gid.x, gid.y);
   let list = 2u * U.ntiles + bins[tile];
@@ -1043,7 +1071,69 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     if ((sf & 1u) == 0u || x < i32(sx & 0xFFFFu) || x > i32(sx >> 16u)) { continue; }
     load_span(SP);
 //#endif
-    shade_and_blend(P, SP, x, y);
+    shade_and_blend(P, SP, x, y, false);
+    if (prims[P + P_TAIL] == ((yn << 16u) | xn) && (x & HM) == 0 && (y & HM) == 0) { store_feedback(12u + (P / PRIM_WORDS) * 12u); }
   }
   px_store(gid.x, gid.y);
+}
+
+// A separate dispatch reduces one designated tail per primitive. No unordered
+// invocation writes the persistent registers consumed by the next batch.
+fn load_feedback() {
+  pipeline_combined = vec4<i32>(feedback[0], feedback[1], feedback[2], feedback[3]);
+  pipeline_memory = vec4<i32>(feedback[4], feedback[5], feedback[6], feedback[7]);
+  pipeline_pre_memory = vec4<i32>(feedback[8], feedback[9], feedback[10], feedback[11]);
+}
+fn store_feedback(offset: u32) {
+  for (var k = 0u; k < 4u; k++) { feedback[offset + k] = pipeline_combined[k]; feedback[offset + 4u + k] = pipeline_memory[k]; feedback[offset + 8u + k] = pipeline_pre_memory[k]; }
+}
+@compute @workgroup_size(1)
+fn resolve_feedback() {
+  load_feedback();
+  for (var i = 0u; i < U.num_prims; i++) {
+    if (prims[i * PRIM_WORDS + P_TAIL] < 0) { continue; }
+    let ST = u32(prims[i * PRIM_WORDS + P_STATE]) * 16u;
+    let image_read = (tables[ST + 6u] & DB_IMAGE_READ) != 0u;
+    for (var k = 0u; k < 4u; k++) {
+      pipeline_combined[k] = feedback[12u + i * 12u + k];
+      if (image_read || k == 3u) { pipeline_memory[k] = feedback[16u + i * 12u + k]; }
+    }
+  }
+  store_feedback(0u);
+}
+// Draw dependent batches in primitive/span/pixel order, keeping the logical X
+// for texturing while px_load/store wrap the linear physical RDRAM address.
+@compute @workgroup_size(1)
+fn ordered_main() {
+  load_feedback(); px_noise = 0u;
+  for (var i = 0u; i < U.num_prims; i++) {
+    let P = i * PRIM_WORDS;
+    let ylo = prims[P + P_YLO]; let yhi = prims[P + P_YHI];
+    let flip = (u32(prims[P + P_FLAGS]) & SETUP_FLIP) != 0u;
+    for (var y = ylo * HS; y < (yhi + 1) * HS; y++) {
+      let SP = (u32(prims[P + P_SPAN]) + u32((y >> HL) - ylo)) * 8u;
+      if ((spans[SP + 7u] & 1u) == 0u) { continue; }
+      load_span(SP);
+      var x0 = sp_start_x * HS; var x1 = (sp_end_x + 1) * HS - 1;
+//#if HD
+      if ((u32(prims[P + P_FLAGS]) & SETUP_FILL_COPY) == 0u) {
+        if (!compute_span(P, y)) { continue; }
+        x0 = sp_start_x; x1 = sp_end_x;
+      }
+//#endif
+      let step = select(-1, 1, flip);
+      for (var x = select(x1, x0, flip); x >= x0 && x <= x1; x += step) {
+        px_load(u32(x), u32(y)); shade_and_blend(P, SP, x, y, false); px_store(u32(x), u32(y));
+      }
+    }
+    let ST = u32(prims[P + P_STATE]) * 16u;
+    let tail = prims[P + P_TAIL];
+    if ((tables[ST] & RS_MULTI_CYCLE) != 0u && tail >= 0) {
+      let y = tail >> 16u; let x = (tail & 65535) + select(-1, 1, flip);
+      let SP = (u32(prims[P + P_SPAN]) + u32(y - ylo)) * 8u;
+      load_span(SP);
+      shade_and_blend(P, SP, x * HS, y * HS, true);
+    }
+  }
+  store_feedback(0u);
 }

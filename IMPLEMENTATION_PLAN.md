@@ -30,14 +30,14 @@ Initial source: `ab28c09f4b059239c6467cabbe683701cc86ce4b`, matching the attache
 
 ## Next implementation order
 
-1. Implement copy/fill framebuffer row-boundary writes consistently in C and GPU binning: Mario Kart's 19 residual color differences include an inclusive copy pixel at x=320 writing the next row's x=0. Preserve logical source coordinates, command/traversal order, alpha rejection and hidden bits; avoid concurrent GPU writes to the same physical halfword. Require synthetic alias cases and the full replay before closure.
-2. Separate exact raw-framebuffer fixture validation from independent VI scanout validation. Fresh raw captures match all five shipped PNGs in every RGB pixel; the existing gate compares a different output stage. Capture VI registers/field phase and establish independent VI expectations without weakening the legacy count thresholds.
-3. Match pipeline feedback against the existing strict pinned-reference target, keeping hardware validation separate. Perfect Dark's first target uses retained memory color in reference cycle 0; World Driver's first target reads retained COMBINED. Add isolated ordered-span and boundary vectors, detect dependent draws, and evaluate an ordered GPU pass or coherent software fallback. Reference behavior and paraLLEl-RDP's documented deliberate alternatives are described in `ACCURACY_INVESTIGATION.md`.
-4. Expand the independent observer to color/depth hidden bits, low-bit-depth formats and all touched framebuffer ranges. Rerun the original reference lanes after implementation and trace any residual discrepancies; altered-reference diagnostics do not establish production accuracy closure. Keep all counted discrepancies failing.
-5. Implement missing chroma key alpha and broaden TMEM/LOD/alpha/VI conformance cases. SetKey register storage currently has no effective key-enable/width consumer; no existing game residual is attributed to this gap yet.
-6. Extend the passing FPU corpus with hardware-derived VR4300 vectors, especially trap/NaN/flush corner cases beyond the independently generated corpus; investigate CPU/cache/timing accuracy separately.
-7. Extend passing desktop/mobile-emulated failure tests to allocation failure and more load/home/state permutations. Validate a physical adapter and real mobile browser before claiming device support.
-8. Extend the six recorded gameplay scenarios and profile frame pacing, long tasks, audio underruns, readback costs and memory by scale. Consider workers only after evidence identifies UI-thread stalls.
+Items 1–5 from the accuracy investigation are implemented; see `RENDERER_ACCURACY_IMPLEMENTATION.md` for the actual code paths, reference policy and acceptance evidence. The remaining priorities are:
+
+1. Broaden independent two-cycle conformance: next-pixel alpha comparison, cycle-one texel replacement/LOD, span-boundary feedback and retained depth/blender shifts. Keep hardware-derived expectations distinct from the pinned reference profile.
+2. Profile ordered GPU dispatch and optimize dependent batches while retaining exact native/HD-at-1x parity. Validate native, software fallback, HD scale changes and state restore on a physical adapter.
+3. Expand TMEM and VI edge-case vectors beyond the passing five CPU-drawn fixture sequences and authored key/format streams. Extend touched-range/memory ownership coverage and GPU gameplay observation beyond the last target.
+4. Extend the FPU corpus with hardware-derived VR4300 trap/NaN/flush vectors; investigate CACHE, address-width and timing accuracy separately.
+5. Extend browser allocation/load/home/state failure permutations and physical mobile/controller/audio tests.
+6. Extend the six recorded gameplay scenarios and profile frame pacing, long tasks, audio underruns, readback costs and memory by scale. Consider workers after measurements identify UI-thread stalls.
 
 ## Single-pass follow-up
 

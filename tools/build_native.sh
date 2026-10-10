@@ -18,7 +18,7 @@ $CC $CFLAGS -o out/cputest tools/cputest.c $LDFLAGS -lm
 ./out/cputest
 REF=${REF:-../ref/angrylion-rdp-plus}
 if [ ! -f "$REF/src/core/n64video.c" ]; then
-  rm -f out/oracle_nn out/oracle_test
+  rm -f out/oracle_nn out/oracle_test out/vitest
   if [ "${REQUIRE_REFERENCE:-0}" = 1 ]; then echo "error: required reference missing" >&2; exit 1; fi
   echo "note: $REF not present, skipping out/oracle_nn (clone ata4/angrylion-rdp-plus next to the repo root)" >&2
   exit 0
@@ -33,3 +33,8 @@ $CC $CFLAGS -DNOISE_ZERO -o out/oracle_nn tools/oracle.c out/reference-zero.c -I
 ls -la out/oracle_nn
 $CC $CFLAGS -DNOISE_ZERO -DRDP_REFERENCE_TEST -o out/oracle_test tools/oracle_test.c out/reference-zero.c -I"$REF/src/core" $LDFLAGS -lm
 ./out/oracle_test
+
+$CC $CFLAGS -DNOISE_ZERO -o out/vitest tools/vitest.c out/reference-zero.c -I"$REF/src/core" $LDFLAGS -lm
+
+$CC $CFLAGS -o out/rdp_vectors tools/rdp_vectors.c $LDFLAGS -lm
+./out/rdp_vectors > out/rdp-vectors.json

@@ -25,11 +25,27 @@ GPU_RUNNER=browser tools/games.sh
 
 Dawn uses the locally installed `webgpu` package. Linux defaults to Mesa lavapipe at `/usr/share/vulkan/icd.d/lvp_icd.json`; install `mesa-vulkan-drivers` through your OS package manager, or set `VK_ICD_FILENAMES` to a valid ICD file. On macOS use `GPU_BACKEND=metal`. A software Vulkan adapter exercises shaders/coherence, not physical GPU performance. Browsers require a working Chromium installation and WebGPU adapter. Missing adapters are explicit failures. Standalone `--noref`/`--noexact` runs are diagnostic SKIP (exit 2), never exact PASS. The suite explicitly accepts diagnostic completion only for its separate 4x seam analysis.
 
-The GPU predicate compares VI RGB, last-batch framebuffer color/hidden/depth data and three execution counters (PC, RSP instructions, primitive count). Framebuffer inspection first uploads CPU-owned changes to the GPU cache; unused depth addresses otherwise report stale data unrelated to rendering. It does not compare the full CPU/FPU/RSP state. Coverage is written into the result. Missing framebuffer comparisons after rendering fail. Zero-render checkpoints can establish execution agreement but not rendering accuracy. The independent Angrylion lane fails on any counted color/depth mismatch or zero comparisons.
+The GPU predicate compares VI RGB, last-batch framebuffer color/hidden/depth data and three execution counters (PC, RSP instructions, primitive count). Framebuffer inspection first uploads CPU-owned changes to the GPU cache; unused depth addresses otherwise report stale data unrelated to rendering. It does not compare the full CPU/FPU/RSP state. Coverage is written into the result. Missing framebuffer comparisons after rendering fail. Zero-render checkpoints can establish execution agreement but not rendering accuracy. The independent Angrylion lane fails on any counted color/depth/hidden mismatch or zero comparisons. It also checks all potentially touched color/depth ranges before SYNC_FULL image resynchronization.
 
-The native oracle disables direct CPU store mappings only in its `RDP_ORACLE` build and observes masked CPU stores plus PI, SI and RSP DMA writes. It materializes queued software drawing before updating the alternate image, preserves untouched bits, and marks CPU-owned hidden bits on both sides through the generated reference adapter. Production builds retain their direct mappings. The required native build also runs `out/oracle_test`: 589824 independently expected texture-coordinate checks and 96 guest-write/order checks. The adapter exposes the pinned reference's perspective divider and sampling clamp only for this test. Both sides zero random bits; this diagnostic policy is not a hardware noise test.
+The native oracle disables direct CPU store mappings only in its `RDP_ORACLE` build and observes masked CPU stores plus PI, SI and RSP DMA writes. It materializes queued software drawing before updating the alternate image, preserves untouched bits, and marks CPU-owned hidden bits on both sides through the generated reference adapter. Production builds retain their direct mappings. The required native build runs `out/oracle_test`: 958565 independent coordinate, guest-write, keying, renderer-stream and observer-mutation checks. Its generated adapter exposes only test/reference functions; the external checkout stays pinned and unchanged. Both sides zero random bits; this diagnostic policy is not a hardware noise test.
 
-`ACCURACY_INVESTIGATION.md` records the remaining row-alias and pipeline-feedback discrepancies. The five shipped PNGs exactly match fresh native **raw framebuffer** captures; the legacy `cmp_ref.py` compares those images with filtered **VI scanout** and still fails. To reproduce the raw comparison, run `./out/native testroms/RSPCP2VRCP.N64 120 -raw -o out/vrcp-raw- -e 120` and compare decoded RGB pixels of `out/vrcp-raw-00120.png` with `testroms/RSPCP2VRCP.png`. Repeat for the other four fixtures. Raw agreement does not validate VI filtering/interlace. A separate exact raw lane and independently referenced VI lane are planned; existing gate thresholds are unchanged.
+`RENDERER_ACCURACY_IMPLEMENTATION.md` describes ordered row aliases, retained pipeline feedback, key alpha and the expanded observer. `ACCURACY_INVESTIGATION.md` preserves the earlier causal traces. Required fixture validation is now split by output stage:
+
+```sh
+.venv/bin/python tools/cmp_raw_ref.py testroms 120
+for rom in testroms/*.N64; do ./out/vitest "$rom" 120; done
+```
+
+The raw lane compares exact RGB pixels/dimensions to each exact PNG filename. The VI lane uses guest registers and the field sequence against the independent pinned reference; no PNG scaling or count tolerance is used. Both run within `npm run validate`. The old `cmp_ref.py` retains its five mixed-stage failures and unchanged thresholds as a CI diagnostic.
+
+The native build also emits authored batches for actual shader testing:
+
+```sh
+node tools/dawntest.mjs testroms/RSPCP2VRCP.N64 1 "0" "" --fn tools/rdp_gpu_vectors.js
+node tools/dawntest.mjs testroms/RSPCP2VRCP.N64 1 "0" "" --fn tools/rdp_gpu_vectors.js --hd 0
+```
+
+These vectors compare framebuffer/hidden data and twelve retained registers across twelve batches, separately from VI/gameplay verdicts. Dependent/two-cycle batches use ordered dispatch; independent batches retain parallel rasterization. `stats.orderedBatches` reports scheduling counts. Low-format software fallback synchronizes prior GPU work and uploads its retained/hidden state before subsequent GPU batches. Ordered rendering can be slower; physical-device performance remains unmeasured.
 
 To reproduce the Mario Kart accuracy replay and native/HD-at-1x parity around the repaired pixel:
 
@@ -52,7 +68,7 @@ node tools/romcheck.mjs roms --frames 1200 --output out/commercial-1200.json
 
 The manifest records source revision/dirty state, WASM SHA256, runtime, ROM identities, frames, statistics and two-run memory/audio hashes. PASS here means deterministic software execution only. `tools/run_wasm.mjs` remains a diagnostic timing utility. Recorded input scripts exist for all six local games; see `tools/games.sh` for their lengths and checkpoints and `VALIDATION_REPORT.md` for executed results.
 
-CI automatically executes the baseline and shipped screenshot-reference gate on push/PR. An independent browser job installs Chromium and runs persistence/lifecycle checks with a shipped homebrew fixture, without commercial ROMs. Any existing reference discrepancy intentionally makes the workflow fail. Repository branch-protection settings are managed separately; adding a workflow does not enforce required checks in settings.
+CI automatically executes the baseline, exact raw fixtures and independent VI fixture gate on push/PR. The legacy mixed-stage screenshot diagnostic remains visible with its unchanged failure counts and an uploaded log. An independent browser job installs Chromium and runs persistence/lifecycle checks with a shipped homebrew fixture, without commercial ROMs. Any mismatch in a required reference lane makes the workflow fail; only the superseded mixed-stage diagnostic uses `continue-on-error`. Repository branch-protection settings are managed separately; adding a workflow does not enforce required checks in settings.
 
 See `IMPLEMENTATION_PLAN.md` for remaining FPU, renderer/reference, browser lifecycle and device-matrix work. See `THIRD_PARTY.md` for fixture and reference provenance.
 

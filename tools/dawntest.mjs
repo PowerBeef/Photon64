@@ -54,6 +54,10 @@ if (listFile) {
 let res;
 if (process.env.XPAK) ctx.window.XPAK_MODE = +process.env.XPAK;     // XPAK=2: run the game without the Expansion Pak
 try { res = await (fn ? ctx.window.runCustom(cfg) : ctx.window.runTest(cfg)); } catch (e) { console.log('ERROR', e.stack || e.message); process.exit(1); }
+if (fn && res.mode === 'rdp-vectors') {
+  res.verdict = { outcome: Number.isInteger(res.batches) && res.batches > 0 ? 'PASS' : 'FAIL', reason: 'synthetic GPU framebuffer, hidden bits and feedback registers' };
+  console.log(JSON.stringify(res, null, 1)); process.exit(res.verdict.outcome === 'PASS' ? 0 : 1);
+}
 if (res.images) for (const im of res.images) {
   const d = Buffer.from(im.data, 'base64');
   fs.writeFileSync(`${images}_${String(im.frame).padStart(5, '0')}.png`, png(im.w, im.h, d));

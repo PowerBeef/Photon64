@@ -4,8 +4,9 @@
 // TMEM snapshots). A batch is then rasterized either by the software pixel pipeline in rdp_pixel.h
 // (reference / fallback) or by the WebGPU compute pipeline, which consumes the very same buffers.
 //
-// The per-pixel math follows the formulation used by parallel-RDP (MIT, (c) Hans-Kristian Arntzen),
-// which itself reproduces the behaviour of real hardware bit for bit.
+// The per-pixel math follows parallel-RDP (MIT, (c) Hans-Kristian Arntzen).
+// Ordered feedback follows the pinned Angrylion comparison target; bounded
+// differential results do not establish hardware accuracy.
 #include "core.h"
 
 // ---- flags (shared with the shader) -----------------------------------------
@@ -18,7 +19,7 @@ enum {
   RS_TEX_LOD = 1 << 9, RS_SHARPEN = 1 << 10, RS_DETAIL = 1 << 11, RS_FILL = 1 << 12, RS_COPY = 1 << 13,
   RS_SAMPLE_QUAD = 1 << 14, RS_ALPHA_TEST = 1 << 15, RS_ALPHA_TEST_DITHER = 1 << 16, RS_MID_TEXEL = 1 << 17,
   RS_USES_TEXEL0 = 1 << 18, RS_USES_TEXEL1 = 1 << 19, RS_USES_LOD = 1 << 20, RS_USES_PIPELINED_TEXEL1 = 1 << 21,
-  RS_CONVERT_ONE = 1 << 22, RS_BILERP0 = 1 << 23, RS_BILERP1 = 1 << 24, RS_NOISE_DUAL = 1 << 25, RS_NOISE = 1 << 28
+  RS_CONVERT_ONE = 1 << 22, RS_BILERP0 = 1 << 23, RS_BILERP1 = 1 << 24, RS_NOISE_DUAL = 1 << 25, RS_KEY = 1 << 26, RS_NOISE = 1 << 28
 };
 enum {
   DB_DEPTH_TEST = 1 << 0, DB_DEPTH_UPDATE = 1 << 1, DB_FORCE_BLEND = 1 << 3, DB_IMAGE_READ = 1 << 4,
@@ -40,11 +41,11 @@ enum { FB_I4, FB_I8, FB_5551, FB_IA88, FB_8888 };
 
 enum { P_FLAGS, P_SPAN, P_YLO, P_YHI, P_STATE, P_TMEM, P_TILESET, P_SEQ, P_RGBA = 8, P_DRGBA_DX = 12, P_DRGBA_DE = 16,
   P_DRGBA_DY = 20, P_STZW = 24, P_DSTZW_DX = 28, P_DSTZW_DE = 32, P_DSTZW_DY = 36, P_CONST = 40, P_FOG = 48, P_BLEND = 49,
-  P_FILL = 50, P_DZ = 51, P_CONV0 = 52, P_CONV1 = 53, P_YBASE = 54,
+  P_FILL = 50, P_DZ = 51, P_CONV0 = 52, P_CONV1 = 53, P_YBASE = 54, P_TAIL = 55,
   // raw edge setup, used by the high-resolution GPU pass to rasterize at sub-pixel positions
   P_XH = 56, P_XM, P_XL, P_DXHDY, P_DXMDY, P_DXLDY, P_YH, P_YM, P_YL, P_SCX, P_SCY, P_STLO /* s, t */, P_STHI = P_STLO + 2 };
 #define PF_ST_CLAMP 0x10000u   /* P_FLAGS: P_STLO / P_STHI are valid (high-resolution pass) */
-enum { S_FLAGS, S_RGB0, S_ALPHA0, S_RGB1, S_ALPHA1, S_DITHER, S_DB, S_BLEND0, S_BLEND1, S_CVGZ };
+enum { S_FLAGS, S_RGB0, S_ALPHA0, S_RGB1, S_ALPHA1, S_DITHER, S_DB, S_BLEND0, S_BLEND1, S_CVGZ, S_KEY_R, S_KEY_G, S_KEY_B };
 
 typedef struct {
   // per-batch framebuffer description (uniform block for the GPU path)
@@ -53,7 +54,7 @@ typedef struct {
   u32 fb_size, dx_shift, dx_mask;
   u32 num_prims, num_spans, num_states, num_tilesets, num_tmem;
   u32 alias, rdram_mask, z_use;                 // z_use: bit 0 some primitive depth-tests, bit 1 some primitive writes depth
-  u32 tiles_x, ntiles, bins_words, pad2;
+  u32 tiles_x, ntiles, bins_words, ordered;
 } BatchInfo;
 
 s32 b_prims[RDP_MAX_PRIMS * PRIM_WORDS] __attribute__((aligned(16)));
@@ -62,7 +63,7 @@ u32 b_states[RDP_MAX_STATES * STATE_WORDS] __attribute__((aligned(16)));
 u32 b_tiles[RDP_MAX_TILESETS * 8 * TILE_WORDS] __attribute__((aligned(16)));
 u32 b_tmem[RDP_MAX_TMEM * 1024] __attribute__((aligned(16)));
 BatchInfo b_info;
-u8 rdp_hidden[RDRAM_MAX / 2];          // bits 0-1: hidden bits, bit 7: written by the CPU since the last GPU sync
+u8 rdp_hidden[RDRAM_MAX / 2];          // bits 0-1: hidden bits, bit 6: software fallback changed hidden bits, bit 7: written by the CPU since the last GPU sync
 u16 rdp_shadow16[RDRAM_MAX / 2];
 u8 blender_lut[0x8000];
 u32 rdp_gpu_mode, rdp_hd_mode;
@@ -226,6 +227,7 @@ static u32 emit_state(void) {
   st[S_DB] = rdp.dbflags;
   st[S_BLEND0] = pack4(rdp.blend[0]); st[S_BLEND1] = pack4(rdp.blend[1]);
   st[S_CVGZ] = rdp.cvg_mode | (rdp.z_mode << 8);
+  for (int i = 0; i < 3; i++) st[S_KEY_R + i] = rdp.key_width[i];
   rdp.state_dirty = 0;
   if (b_info.num_states && !memcmp(st, b_states + (b_info.num_states - 1) * STATE_WORDS, sizeof st)) return b_info.num_states - 1;
   memcpy(b_states + b_info.num_states * STATE_WORDS, st, sizeof st);
@@ -309,7 +311,7 @@ static void batch_begin(void) {
   b_info.alias = (rdp.fb_addr == rdp.z_addr) && (rdp.fb_fmt == FB_5551 || rdp.fb_fmt == FB_IA88);
   b_info.rdram_mask = RDRAM_MAX - 1;
   b_info.z_use = 0;
-  rdp.deduced_height = 0;
+  rdp.deduced_height = 0; b_info.ordered = 0;
 }
 
 // High-resolution pass: texture coordinate bounds.
@@ -402,7 +404,7 @@ static void draw_primitive(TriSetup *s, AttrSetup *a) {
   p[P_CONV0] = (rdp.convert[0] & 0xFFFF) | (rdp.convert[1] << 16);
   p[P_CONV1] = (rdp.convert[2] & 0xFFFF) | (rdp.convert[3] << 16);
   p[P_YBASE] = s->yh >> 2;
-  p[55] = 0;
+  p[P_TAIL] = -1; // final shaded sample, for deterministic GPU feedback reduction
   p[P_XH] = s->xh; p[P_XM] = s->xm; p[P_XL] = s->xl; p[P_DXHDY] = s->dxhdy; p[P_DXMDY] = s->dxmdy; p[P_DXLDY] = s->dxldy;
   p[P_YH] = s->yh; p[P_YM] = s->ym; p[P_YL] = s->yl;
   p[P_SCX] = (s32)(rdp.sc_xlo | (rdp.sc_xhi << 16)); p[P_SCY] = (s32)(rdp.sc_ylo | (rdp.sc_yhi << 16));
@@ -410,6 +412,46 @@ static void draw_primitive(TriSetup *s, AttrSetup *a) {
 
   u32 *sp = b_spans + b_info.num_spans * SPAN_WORDS;
   for (s32 y = min_line; y <= max_line; y++, sp += SPAN_WORDS) span_setup(s, y, sp);
+  const u32 *st = b_states + (u32)p[P_STATE] * STATE_WORDS;
+  if (!(st[S_FLAGS] & (RS_COPY | RS_FILL))) {
+    int cycle = (st[S_FLAGS] & RS_MULTI_CYCLE) ? 0 : 1;
+    u32 rgb = st[S_RGB0 + 2 * cycle], alpha = st[S_ALPHA0 + 2 * cycle];
+    int feedback = 0;
+    for (int slot = 0; slot < 4; slot++) {
+      if (((rgb >> (slot * 8)) & 255) == 0 || (slot == 2 && ((rgb >> 16) & 255) == 7)) feedback = 1;
+      if (slot != 2 && ((alpha >> (slot * 8)) & 255) == 0) feedback = 1;
+    }
+    if (!(st[S_DB] & DB_IMAGE_READ) && (rdp.blend[0][0] == 1 || rdp.blend[0][2] == 1 ||
+        ((st[S_FLAGS] & RS_MULTI_CYCLE) && (rdp.blend[1][0] == 1 || rdp.blend[1][2] == 1)))) feedback = 1;
+    // Cycle-zero blending reads the previous framebuffer sample in two-cycle mode.
+    if (st[S_FLAGS] & RS_MULTI_CYCLE) feedback = 1;
+    b_info.ordered |= feedback;
+  }
+  for (s32 y = min_line; y <= max_line; y++) {
+    const u32 *span = b_spans + (b_info.num_spans + y - min_line) * SPAN_WORDS;
+    if (!(span[7] & 1)) continue;
+#ifdef RDP_ORACLE
+    // Include every target since SYNC_FULL, including row aliases and buffers
+    // replaced by a later SetColorImage. Compare before resynchronizing images.
+    extern void rdp_oracle_touch(u32, u32, u32);
+    u32 start = (span[4] & 65535) + y * rdp.fb_width;
+    u32 count = (span[4] >> 16) - (span[4] & 65535) + 1;
+    u32 size = rdp.fb_fmt == FB_8888 ? 4 : rdp.fb_fmt >= FB_5551 ? 2 : 1;
+    rdp_oracle_touch(rdp.fb_addr + start * size, count * size, 0);
+    if (!(st[S_FLAGS] & (RS_COPY | RS_FILL)) && (st[S_DB] & (DB_DEPTH_TEST | DB_DEPTH_UPDATE)))
+      rdp_oracle_touch(rdp.z_addr + start * 2, count * 2, 1);
+#endif
+    u32 end = span[4] >> 16;
+    if (end >= rdp.fb_width) {
+      b_info.ordered = 1;
+      u32 height = y + end / rdp.fb_width + 1;
+      if (height > rdp.deduced_height) rdp.deduced_height = height;
+    }
+    if (!(st[S_FLAGS] & (RS_COPY | RS_FILL))) {
+      s32 x = (p[P_FLAGS] & SETUP_FLIP) ? (s32)end : (s32)(span[4] & 65535);
+      p[P_TAIL] = (y << 16) | x;
+    }
+  }
   memset(sp, 0, SPAN_WORDS * 4);   // sentinel line (valid = 0) for the next-line peek
   if (rdp_hd_mode && rdp_gpu_mode && !(rdp.sflags & (RS_FILL | RS_COPY | RS_PERSPECTIVE)) &&
       (b_states[(u32)p[P_STATE] * STATE_WORDS + S_FLAGS] & (RS_USES_TEXEL0 | RS_USES_TEXEL1 | RS_USES_PIPELINED_TEXEL1)))
@@ -435,7 +477,7 @@ void rdp_flush(void) {
     // from here on the CPU copy of what was just drawn is out of date
     if (b_info.fb_fmt == FB_8888) gpu_mark_stale(b_info.fb_addr * 2, pixels * 2); else gpu_mark_stale(b_info.fb_addr, pixels);
     if (!b_info.alias && (b_info.z_use & 2)) gpu_mark_stale(b_info.depth_addr, pixels);
-  } else sw_render_batch();
+  } else { sw_render_batch(); if (rdp_gpu_mode) gpu_feedback_dirty = 1; }
   bin_reset();
   b_info.num_prims = b_info.num_spans = b_info.num_states = b_info.num_tilesets = b_info.num_tmem = 0;
   rdp.state_dirty = rdp.tiles_dirty = rdp.tmem_dirty = 1;
@@ -667,8 +709,9 @@ static void rdp_exec(const u32 *w) {
       rdp.key_width[1] = (w[0] >> 12) & 0xFFF; rdp.key_width[2] = w[0] & 0xFFF;
       rdp.key_center[1] = (w[1] >> 24) & 0xFF; rdp.key_scale[1] = (w[1] >> 16) & 0xFF;
       rdp.key_center[2] = (w[1] >> 8) & 0xFF; rdp.key_scale[2] = w[1] & 0xFF;
+      rdp.state_dirty = 1;
       break;
-    case 0x2B: rdp.key_width[0] = (w[1] >> 16) & 0xFFF; rdp.key_center[0] = (w[1] >> 8) & 0xFF; rdp.key_scale[0] = w[1] & 0xFF; break;
+    case 0x2B: rdp.key_width[0] = (w[1] >> 16) & 0xFFF; rdp.key_center[0] = (w[1] >> 8) & 0xFF; rdp.key_scale[0] = w[1] & 0xFF; rdp.state_dirty = 1; break;
     case 0x2C: {
       u64 m = ((u64)w[0] << 32) | w[1];
       for (int i = 0; i < 6; i++) {
@@ -689,7 +732,7 @@ static void rdp_exec(const u32 *w) {
       SMASK(f, w[0] & (1 << 19), RS_PERSPECTIVE); SMASK(f, w[0] & (1 << 18), RS_DETAIL); SMASK(f, w[0] & (1 << 17), RS_SHARPEN);
       SMASK(f, w[0] & (1 << 16), RS_TEX_LOD); SMASK(f, w[0] & (1 << 15), RS_TLUT); SMASK(f, w[0] & (1 << 14), RS_TLUT_TYPE);
       SMASK(f, w[0] & (1 << 13), RS_SAMPLE_QUAD); SMASK(f, w[0] & (1 << 12), RS_MID_TEXEL); SMASK(f, w[0] & (1 << 11), RS_BILERP0);
-      SMASK(f, w[0] & (1 << 10), RS_BILERP1); SMASK(f, w[0] & (1 << 9), RS_CONVERT_ONE);
+      SMASK(f, w[0] & (1 << 10), RS_BILERP1); SMASK(f, w[0] & (1 << 9), RS_CONVERT_ONE); SMASK(f, w[0] & (1 << 8), RS_KEY);
       SMASK(d, w[1] & (1 << 14), DB_FORCE_BLEND); SMASK(f, w[1] & (1 << 13), RS_ALPHA_CVG_SELECT); SMASK(f, w[1] & (1 << 12), RS_CVG_TIMES_ALPHA);
       SMASK(d, w[1] & (1 << 7), DB_COLOR_ON_CVG); SMASK(d, w[1] & (1 << 6), DB_IMAGE_READ); SMASK(d, w[1] & (1 << 5), DB_DEPTH_UPDATE);
       SMASK(d, w[1] & (1 << 4), DB_DEPTH_TEST); SMASK(f, w[1] & (1 << 3), RS_AA); SMASK(d, w[1] & (1 << 3), DB_AA);
@@ -800,6 +843,10 @@ static void rdp_exec_buffered(void) {
     u32 cmd = (rdp.cmd[pos] >> 24) & 63;
     u32 len = rdp_len[cmd] * 2;
     if (pos + len > rdp.cmd_n) break;
+    int draw = (cmd >= 8 && cmd <= 15) || cmd == 0x24 || cmd == 0x25 || cmd == 0x36;
+    if (rdp_gpu_mode && draw && rdp.fb_fmt < FB_5551 && gpu_stale_n) {
+      rdp_flush(); gpu_request_sync(); rdp_paused = 1; break;
+    }
     if (rdp_gpu_mode && (cmd == 0x30 || cmd == 0x33 || cmd == 0x34) && load_blocked(rdp.cmd + pos, cmd)) { rdp_paused = 1; break; }
 #ifdef RDP_ORACLE
     if (rdp_hook_command) rdp_hook_command(rdp.cmd + pos, len);
@@ -859,6 +906,7 @@ void rdp_init_tables(void) {
 
 void rdp_reset(void) {
   rdp_paused = 0;
+  memset(pipeline_feedback, 0, sizeof pipeline_feedback); gpu_feedback_dirty = 0;
   memset(&rdp, 0, sizeof rdp);
   memset(&b_info, 0, sizeof b_info);
   memset(rdp_hidden, 0, sizeof rdp_hidden);

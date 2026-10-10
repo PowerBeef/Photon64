@@ -18,3 +18,6 @@ node tools/xpaktest.mjs
 node tools/romcheck.mjs testroms --frames 300 --output out/homebrew.json
 PY=${PY:-python3}; [ ! -x .venv/bin/python ] || PY=.venv/bin/python
 "$PY" tools/compare_test.py
+
+"$PY" tools/cmp_raw_ref.py testroms 120
+for rom in testroms/*.N64; do ./out/vitest "$rom" 120; done

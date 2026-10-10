@@ -2,7 +2,46 @@
 
 Audit baseline: `ab28c09f4b059239c6467cabbe683701cc86ce4b`. The checkout matched the attached report exactly. The original report remains unchanged. This document reports the implementation milestone and qualifications, not a new accuracy certification.
 
-Sections below preserve milestone history; later follow-ups supersede earlier FPU and stale-memory oracle limitations/counts. For the latest remaining-accuracy diagnosis, see `ACCURACY_INVESTIGATION.md`: all five shipped raw framebuffer images match exactly, while their legacy VI screenshot gate still fails; Mario Kart row aliasing and Perfect Dark/World Driver pipeline-feedback discrepancies are traced and full-run causal probes remove the observed color differences. Production semantics and strict-reference verdicts are unchanged. No hardware accuracy certification is implied.
+Sections below preserve milestone history. The renderer implementation below supersedes the earlier remaining-color failures and the investigation's altered-reference causal probes. `RENDERER_ACCURACY_IMPLEMENTATION.md` describes the production changes and remaining boundaries; `ACCURACY_INVESTIGATION.md` preserves the original diagnosis. No hardware accuracy certification is implied.
+
+## Renderer accuracy implementation (10 October 2026)
+
+The five investigation items are implemented in the worktree based on `ae97e914f9a2c6ff6a3e5c1286b5f90bd40a1083`: ordered row aliases, separate raw/VI fixture validation, retained combiner/blender feedback, broader target/hidden-bit comparison, and chroma key alpha. Acceptance uses the pinned reference's standard generated guest-write/noise-zero adapter, without the altered-reference probes. The pinned reference checkout remains unchanged. The adapter compares RDP behavior with shared guest writes and reference-master memory synchronization; this is bounded renderer evidence, not independent whole-machine or console-hardware conformance.
+
+All five full native recorded-input replays now pass. Before each SYNC_FULL resynchronization, the observer additionally compares potentially touched earlier/offscreen/wrapping color targets, used depth targets and effective hidden bits. Every counted discrepancy is fatal.
+
+| Replay | VI fields | RDP frames | Legacy framebuffer pixels | Touched halfwords | Color / depth / hidden differences |
+|---|---:|---:|---:|---:|---|
+| Super Mario 64 | 4,200 | 1,915 | 147,072,000 | 284,343,587 | 0 / 0 / 0 |
+| GoldenEye | 4,600 | 2,151 | 236,948,400 | 321,198,000 | 0 / 0 / 0 |
+| Mario Kart 64 | 3,300 | 1,252 | 96,153,600 | 192,232,082 | 0 / 0 / 0 |
+| Perfect Dark | 6,500 | 2,249 | 344,826,880 | 434,180,464 | 0 / 0 / 0 |
+| World Driver Championship | 16,762 | 8,165 | 1,131,752,960 | 1,123,277,163 | 0 / 0 / 0 |
+
+These runs total 35,362 VI fields, 1,956,753,840 legacy framebuffer pixels and 2,355,231,296 touched halfword observations. Observations repeat addresses across frames and are not distinct memory locations. Their logs are `out/accuracy-final-{sm,ge,mk,pd,wdc}.log`. The same standard-reference comparison previously retained 19 Mario Kart, 148,112 Perfect Dark and 54,402 World Driver color differences; the production changes close those observed failures.
+
+Actual Dawn 0.6.2/lavapipe native and HD-at-1x checks pass 21 selected gameplay checkpoints:
+
+| Replay | Native checkpoints | Full-storage HD-at-1x checkpoints |
+|---|---|---|
+| Mario Kart | 1916, 2214, 2216, 3299 | 1916, 2214, 2216, 3299 |
+| GoldenEye | 2600, 3800, 4599 | 2600, 3800, 4599 |
+| Perfect Dark | 2911, 5900, 6499 | Not executed in this pass |
+| World Driver | 6861, 6877 | 6861, 6877 |
+
+Each paired core replays the input sequence; GPU drawing runs in six-field windows around checkpoints. The predicate remains exact VI RGB, last-batch framebuffer color/hidden/depth and three execution counters. This is not continuous GPU execution or complete machine-state comparison. Separately, both native and HD-at-1x authored GPU streams pass twelve batches, comparing 768 framebuffer/hidden halfwords and 144 retained register values per stream. Expected software values are never uploaded to the GPU. Low-format I4/I8/IA16 cases and independent separate-depth cases run in the native/reference command suite, not the GPU-only stream.
+
+The final `npm run validate` passes: 15 legacy JS checks, 41 Node tests, 958,565 pinned-reference coordinate/write/key/command/observer checks, ASan/UBSan core checks, 11,188 identical core checks in native and each WASM O0/O3 build, 29 raw-output boundary checks, Expansion Pak checks, deterministic homebrew execution and three comparator tests. All five raw fixture PNGs match exact RGB dimensions/pixels. The independent VI lane compares 95 active fields and 29,184,000 RGB pixels per fixture: 475 fields and 145,920,000 pixels total, with zero differences. Invalid output, omitted comparisons and counted mismatches fail these lanes. A fresh six-cartridge 300-field/two-run check passes with the original RDRAM/audio hashes.
+
+The legacy screenshot-content comparator still reports all five original failures with unchanged thresholds and images. Its raw-reference/VI-output stage mismatch is now an explicit nonblocking CI diagnostic with an uploaded log. Required fixture gates instead compare exact raw output and independent VI output separately. The workflow still fails on any mismatch in those required gates. Hosted browser/CI results for this publication must be reported separately; earlier completed Actions runs below validate earlier revisions.
+
+Final local build identities:
+
+- `out/n64.wasm` SHA256: `db8905e956c8fc532af2635e75e31b02665f967f4d246fd13eee88452dace7ed`.
+- `out/photon64.html` SHA256: `76672304ca773a311eb4d0595cc3429f0418d91e60ef54b2482c561bba54bd21`.
+- Baseline log: `out/accuracy-final-baseline.log`; commercial determinism log: `out/accuracy-final-commercial.log`; GPU logs: `out/accuracy-final-*-gpu.json`, `out/accuracy-final-*-hd1.json` and `out/accuracy-final-vectors-{native,hd1}.json`.
+
+Remaining work includes independent two-cycle span/boundary vectors for next-pixel alpha, cycle-one texel/LOD and retained depth/blender shifts; TMEM/VI corner cases; profiling ordered GPU dispatch; and physical GPU/mobile/controller/audio coverage. All two-cycle batches currently use conservative ordered execution, which can substantially reduce GPU throughput. Display-only 2x/4x feedback remains approximate. The pinned I8 fill quirk is followed explicitly as a comparison profile, not asserted as hardware behavior. CACHE, 32-bit PC/address modeling and constant-CPI timing remain unchanged. Bounded zero-difference replays do not establish full-game compatibility.
 
 ## Verified source findings and corrections
 
@@ -18,7 +57,7 @@ Sections below preserve milestone history; later follow-ups supersede earlier FP
 | F08 GPU readback | Map rejection removed tracking without applying bytes or failing the barrier. Pending ranges and an error latch survive failure; buffers clean up; obsolete generations cannot apply or acknowledge. Device loss and synchronous renderer initialization errors stop the session instead of silently continuing from stale memory. | Actual Dawn device destruction passes on software Vulkan; physical device-loss coverage and transparent checkpoint recovery remain absent. |
 | F09 ranges | `syncRange` capped total work to scratch capacity. It now visits every chunk, including tail halfwords and RAM-end clipping, and rejects zero capacity. | Synthetic coverage and local software-Vulkan execution; physical large-target matrix remains open. |
 | F10 allocation bounds | File size is checked before reading; counted streams cancel over-budget ZIP/gzip output. ZIP records/flags/CRC are validated before accepting a candidate. | Fuzzing, allocation peak profiling and broader malformed state structure validation remain. |
-| F11 automation | Placeholder npm test and absent workflow are replaced with meaningful tests, a required baseline script and CI, including an independent browser job. | Hosted baseline validation and browser checks pass. The screenshot lane fails and remains visible; branch-protection settings were not changed. |
+| F11 automation | Placeholder npm test and absent workflow are replaced with meaningful tests, a required baseline script and CI, including an independent browser job. | Earlier hosted baseline/browser checks pass. Required exact raw and independent VI gates now replace the mixed-stage screenshot gate; its unchanged failures remain visible as a diagnostic. Branch-protection settings were not changed. |
 | F12 reproducibility | GCC vector portability and `-lm` linking are fixed; SDK digest, oracle commit, Node/Dawn/Playwright and Python dependencies are pinned. Setup was exercised successfully. Missing required references fail, and missing optional references remove stale oracle binaries. | macOS and physical device environments remain untested. |
 | F13 metadata | npm license now matches root MIT; dependency and fixture provenance/uncertainties are documented in `THIRD_PARTY.md`. All ten shipped ROM/PNG blobs match the recorded PeterLemon/N64 revision exactly. | Fixture distribution permissions, original PNG capture settings and formulation derivation remain unverified. |
 

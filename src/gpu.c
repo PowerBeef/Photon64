@@ -172,7 +172,7 @@ EXPORT(n64_sync_scan) u32 n64_sync_scan(u32 idx16, u32 count) {
   for (u32 i = 0; i < count; i++) {
     u32 k = (idx16 + i) & m16;
     u32 v = *(u16 *)(rdram + ((k ^ 1) << 1));
-    if (v != gpu_shadow16[k] || (rdp_hidden[k] & 0x80)) {
+    if (v != gpu_shadow16[k] || (rdp_hidden[k] & 0xC0)) {
       // hidden bits: what the software renderer left there if it wrote this word last, else the CPU-write rule
       u32 h = HIDDEN_AT(k, v);
       gpu_shadow16[k] = (u16)v; rdp_hidden[k] = (u8)h; rdp_shadow16[k] = (u16)v;
@@ -206,7 +206,7 @@ EXPORT(n64_readback_apply) void n64_readback_apply(u32 idx16, u32 count, const u
   for (u32 i = 0; i < count; i++) {
     u32 k = (idx16 + i) & m16;
     u16 *p = (u16 *)(rdram + ((k ^ 1) << 1));
-    if (*p == gpu_shadow16[k] && !(rdp_hidden[k] & 0x80)) {
+    if (*p == gpu_shadow16[k] && !(rdp_hidden[k] & 0xC0)) {
       u32 g = src[i];
       *p = (u16)g; gpu_shadow16[k] = (u16)g;
       rdp_hidden[k] = (g >> 16) & 3; rdp_shadow16[k] = (u16)g;
@@ -216,6 +216,7 @@ EXPORT(n64_readback_apply) void n64_readback_apply(u32 idx16, u32 count, const u
 EXPORT(n64_sync_ptrs) u32 *n64_sync_ptrs(void) {
   static u32 t[8];
   t[0] = (u32)(uintptr_t)sync_stage; t[1] = (u32)(uintptr_t)sync_runs; t[2] = (u32)(uintptr_t)&sync_nruns; t[3] = (u32)(uintptr_t)b_bins;
+  t[7] = (u32)(uintptr_t)&gpu_feedback_dirty;
   t[4] = (u32)(uintptr_t)&b_bins_words; t[5] = SYNC_MAX; t[6] = (u32)(uintptr_t)&gpu_hint;
   return t;
 }

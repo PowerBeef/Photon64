@@ -6,9 +6,9 @@ const context = vm.createContext({ console, GPUBufferUsage: { MAP_READ: 1, COPY_
 vm.runInContext(fs.readFileSync(new URL('../src/web/gpu.js', import.meta.url), 'utf8') + '\nthis.N64Gpu = N64Gpu;', context);
 const proto = context.N64Gpu.prototype;
 function gpu(map = async () => {}) {
-  const mem = new ArrayBuffer(128), calls = { done: 0, apply: 0, destroy: 0, scan: [], uploads: [] };
-  const g = Object.assign(Object.create(proto), { mem: { buffer: mem }, p: { syncMax: 4, nruns: 0, runs: 4, stage: 20 },
-    scratch: 0, scratchWords: 16, fbBuf: {}, touched: new Map(), inflight: [], pool: [],
+  const mem = new ArrayBuffer(160), calls = { done: 0, apply: 0, destroy: 0, scan: [], uploads: [] };
+  const g = Object.assign(Object.create(proto), { mem: { buffer: mem }, p: { syncMax: 4, nruns: 0, runs: 4, stage: 20, feedback: 80, feedbackDirty: 136 },
+    scratch: 0, scratchWords: 16, fbBuf: {}, native: { feedbackBuf: {} }, touched: new Map(), inflight: [], pool: [],
     stats: { waits: 0, late: 0, syncs: 0, readbacks: 0, uploads: 0 },
     ex: { n64_sync_done: () => calls.done++, n64_readback_apply: () => calls.apply++,
       n64_sync_scan: (idx, n) => { calls.scan.push([idx, n]); const u = new Uint32Array(mem); u[0] = 1; u[1] = n - 1; u[2] = 1; return 1; },
@@ -54,4 +54,12 @@ test('lost device never acknowledges an empty synchronization barrier', async ()
   const { g, calls } = gpu(); g.lost = true;
   await assert.rejects(g.syncNow(), /device lost/);
   assert.equal(calls.done, 0);
+});
+
+test('feedback snapshot offsets remain aligned for odd halfword counts', async () => {
+  const { g } = gpu();
+  g.device.createBuffer = () => ({ size: 256, mapAsync: async () => {}, getMappedRange(offset, size) {
+    assert.equal(offset % 8, 0); return new ArrayBuffer(size);
+  }, unmap() {}, destroy() {} });
+  g.touch(1, 1); await g.syncNow();
 });

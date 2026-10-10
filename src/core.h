@@ -162,7 +162,7 @@ extern u8 rdp_hidden[];
 extern u16 rdp_shadow16[];
 void gpu_mark_dirty(u32 pa, u32 len);
 // hidden (9th) bits of halfword k whose current value is v
-#define HIDDEN_AT(k, v) ((rdp_shadow16[k] == (v) && !(rdp_hidden[k] & 0x80)) ? (u32)rdp_hidden[k] : ((v) & 1) * 3u)
+#define HIDDEN_AT(k, v) ((rdp_shadow16[k] == (v) && !(rdp_hidden[k] & 0x80)) ? ((u32)rdp_hidden[k] & 3u) : ((v) & 1) * 3u)
 
 // cpu.c
 void cpu_reset(void);

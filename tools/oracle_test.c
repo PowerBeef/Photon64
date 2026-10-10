@@ -3,10 +3,13 @@
 #define main oracle_entry
 #include "oracle.c"
 #undef main
+#include "rdp_vectors.h"
 static unsigned checks, failed;
 static void check(int ok) { checks++; if (!ok) { printf("FAIL oracle check %u\n", checks); failed++; } }
 void photon_reference_coords(int s, int t, int w, int *os, int *ot, int *overflow);
 unsigned photon_reference_hidden(unsigned pa);
+void photon_reference_key(const int *, const int *, const int *, const int *, const unsigned *, int, int, int *, unsigned *);
+static u32 rgba(const int *v, int a) { return ((u32)v[0] << 24) | ((u32)v[1] << 16) | ((u32)v[2] << 8) | (u32)a; }
 int main(void) {
   // Every positive W plus zero/negative W, both axes, signed extrema and
   // deterministic arbitrary inputs. Expected samples come from the separate
@@ -79,6 +82,53 @@ int main(void) {
   bus_write32(0x4000, 0xAABBCCDD, ~0u);
   check(*(u32 *)(alt_rdram + 0x4000) == 0x87654321);
   check(photon_reference_hidden(0x4000) == 3 && photon_reference_hidden(0x4002) == 3);
+  // Differential key vectors cover fractional ties, signed 17-bit wrap,
+  // per-channel minima, RGB bypass and every coverage/alpha override.
+  for (int sample = 0; sample < 512; sample++) {
+    int a[3], b[3], c[3], d[3]; unsigned width[3];
+    for (int k = 0; k < 3; k++) {
+      rng = rng * 1664525u + 1013904223u;
+      a[k] = rng & 255; b[k] = (rng >> 8) & 255; c[k] = (rng >> 16) & 255; d[k] = (rng >> 24) & 255;
+      width[k] = sample < 256 ? sample : (rng & 4095);
+    }
+    for (int flags = 0; flags < 4; flags++) for (unsigned cv = 0; cv <= 8; cv++) for (int al = 0; al < 4; al++) {
+      int alpha = (int[]){0, 1, 128, 255}[al], expected[4]; unsigned ref_cv = cv;
+      photon_reference_key(a, b, c, d, width, alpha, flags, expected, &ref_cv);
+      CombIn in = {0}; s32 out[4], raw[3], bypass[3];
+      in.c_muladd = rgba(a, 0); in.c_mulsub = rgba(b, 0); in.c_mul = rgba(c, 0); in.c_add = rgba(d, alpha);
+      combiner_equation(&in, 0x05060603, 0x03070707, out, raw, bypass);
+      int ea = clamp9(out[3]); ea += (ea + 1) >> 8;
+      int temp = (ea * cv + 4) >> 3;
+      unsigned mine_cv = (flags & 1) ? (unsigned)(temp >> 5) : cv;
+      int mine_alpha = (flags & 2) ? mini((flags & 1) ? temp : (int)cv * 32, 255) : chroma_key_alpha(raw, width);
+      for (int k = 0; k < 3; k++) check(clamp9(bypass[k]) == expected[k]);
+      check(mine_alpha == expected[3]); check(mine_cv == ref_cv);
+    }
+  }
+  memset(rdram, 0, RDRAM_MAX); memset(alt_rdram, 0, RDRAM_MAX); rdp_reset();
+  n64video_close(); reference_init(); need_resync = 0;
+  memset(touched, 0, sizeof touched); memset(touched_page, 0, sizeof touched_page);
+  for (u32 i = 0; i < sizeof renderer_vectors / sizeof *renderer_vectors; i++) {
+    u32 count = rdp_len[(renderer_vectors[i][0] >> 24) & 63] * 2;
+    hook_command(renderer_vectors[i], count); rdp_exec(renderer_vectors[i]); hook_post();
+  }
+  for (u32 i = 0; i < sizeof small_format_vectors / sizeof *small_format_vectors; i++) {
+    hook_command(small_format_vectors[i], 2); rdp_exec(small_format_vectors[i]); hook_post();
+  }
+  check(tot_bad == 0 && tot_zbad == 0);
+  check(touched_color_bad == 0 && touched_depth_bad == 0 && touched_hidden_bad == 0);
+  touched_color_bad = touched_depth_bad = touched_hidden_bad = 0;
+  // Mutation sensitivity: an earlier/offscreen byte, a RAM-end wrap and a
+  // hidden-only mismatch must remain counted independently of the current FB.
+  memset(touched, 0, sizeof touched); memset(touched_page, 0, sizeof touched_page);
+  memset(rdram, 0, RDRAM_MAX); memset(alt_rdram, 0, RDRAM_MAX); memset(rdp_hidden, 0x80, sizeof rdp_hidden);
+  photon_reference_cpu_write(0, RDRAM_MAX);
+  alt_rdram[0x1000 ^ 3] = 1; alt_rdram[(RDRAM_MAX - 1) ^ 3] = 1;
+  rdp_oracle_touch(0x1000, 1, 0); rdp_oracle_touch(RDRAM_MAX - 1, 2, 0);
+  compare_touched(); check(touched_color_bad == 2); check(touched_depth_bad == 0);
+  unsigned long long prior_hidden_bad = touched_hidden_bad;
+  rdp_hidden[0x2000 >> 1] = 3; rdp_shadow16[0x2000 >> 1] = 0;
+  rdp_oracle_touch(0x2000, 2, 1); compare_touched(); check(touched_hidden_bad == prior_hidden_bad + 1);
   printf("oracle coordinates/writes: %u checks, %u failed\n", checks, failed);
   return failed != 0;
 }

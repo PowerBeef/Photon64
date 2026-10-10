@@ -2,7 +2,7 @@
 
 ## Project and source map
 
-Photon64 is an experimental Nintendo 64 emulator: a freestanding C core compiled to WASM, a JavaScript frontend, and native/WebGPU renderers. Read `DEVELOPMENT.md` for commands, `IMPLEMENTATION_PLAN.md` for priorities and acceptance criteria, `VALIDATION_REPORT.md` for evidence and open failures, and `ACCURACY_INVESTIGATION.md` for traced residual mechanisms and reference-policy limits. Deterministic boot runs or software/GPU agreement do not establish hardware accuracy.
+Photon64 is an experimental Nintendo 64 emulator: a freestanding C core compiled to WASM, a JavaScript frontend, and native/WebGPU renderers. Read `DEVELOPMENT.md` for commands, `IMPLEMENTATION_PLAN.md` for priorities and acceptance criteria, `VALIDATION_REPORT.md` for evidence and open failures, `RENDERER_ACCURACY_IMPLEMENTATION.md` for current renderer changes, and `ACCURACY_INVESTIGATION.md` for historical traces and reference-policy limits. Deterministic boot runs or software/GPU agreement do not establish hardware accuracy.
 
 - `src/n64.c` includes the core; `cpu.c`, `rsp.c`, `rdp.c`, `vi.c`, `bus.c`, `api.c` and `gpu.c` implement machine and host behavior.
 - `src/web/app.js` owns sessions, persistence and UI; `gpu.js` owns GPU coherence; `*.wgsl` implement rendering/merge passes. `app.html` is the bundle template.
@@ -39,11 +39,11 @@ Setup supports Linux x86_64 and macOS, installs local dependencies, and writes `
 - `npm run build`: compile WASM and assemble the HTML app.
 - `npm run validate`: required baseline; native/WASM/app builds, JS regressions, native ASan/UBSan, identical O0/O3 WASM vectors, Expansion Pak checks, deterministic homebrew execution and comparator tests. Requires the pinned reference but no commercial ROM, browser or GPU.
 - `npm test`: focused frontend/GPU/gate regressions; actual-core cases require an existing `out/n64.wasm`.
-- `.venv/bin/python tools/cmp_ref.py testroms 120`: separate coarse reference-image gate. Documented discrepancies must stay visible.
+- Exact raw and independently referenced VI fixture lanes run within `npm run validate`. `.venv/bin/python tools/cmp_ref.py testroms 120` retains the superseded mixed-stage coarse diagnostic with unchanged thresholds/failures; CI records its log with `continue-on-error`.
 - `npm run test:roms`: local commercial fixtures for 300 fields twice, with hashes. PASS means determinism, not compatibility.
 - `tools/games.sh --check-roms`, then `GPU_RUNNER=dawn tools/games.sh`: recorded-input independent-reference and GPU/software lanes. Missing ROMs/adapters, incomplete checkpoints and counted mismatches fail.
 
-Run checks appropriate to changes; documentation-only edits do not require rebuilding unchanged semantics. Add meaningful regressions for reproduced failures. Do not weaken thresholds or change expectations merely to get green results. Preserve PASS/FAIL/SKIP: `--noref` and `--noexact` are diagnostic SKIP. GPU coverage remains VI RGB, last-batch framebuffer color/hidden/depth and three execution counters, not full machine-state conformance. Upload CPU-owned changes before inspecting raw GPU-cache memory.
+Run checks appropriate to changes; documentation-only edits do not require rebuilding unchanged semantics. Add meaningful regressions for reproduced failures. Do not weaken thresholds or change expectations merely to get green results. Preserve PASS/FAIL/SKIP: `--noref` and `--noexact` are diagnostic SKIP. Gameplay GPU coverage remains VI RGB, last-batch framebuffer color/hidden/depth and three execution counters. Authored `rdp_gpu_vectors.js` batches additionally compare twelve retained registers; neither lane proves full machine-state conformance. Native oracle coverage includes all potentially touched targets and effective hidden bits. Upload CPU-owned changes before inspecting raw GPU-cache memory.
 
 ## Browser and GPU execution
 
