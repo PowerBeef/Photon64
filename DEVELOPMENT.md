@@ -154,3 +154,7 @@ Run `node tools/gpu_lifecycle.mjs` with the selected Vulkan/Metal adapter. The d
 The required matrix has exactly nine named jobs: baseline, GPU, Safari and six browser variants. Safari journals every request and requires desktop-alone plus five clean full sequences, stopping at the first failure. `filecheck.mjs` separately tests direct-file import/core/storage/audio initialization. Physical file choosers, real output quality and physical GPU performance are separate device gates. Release packaging reads notices from the selected source SHA, validates the tested artifact digest and requires the explicit job set. Changing the release workflow alone does not republish an older manifest.
 
 See [migration/recovery](MIGRATION.md), [capability limits](CAPABILITIES.md) and [implementation status](reports/implementation-2026-10-10/REPORT.md).
+
+### Continuous replay warm-up
+
+`GPU_WARMUP_SNAPSHOT=1` with `GPU_WARMUP` runs the recorded-input software warm-up once, then seeds the second same-core/cartridge instance from that checkpoint. The report labels this strategy; it does not establish independent boot or CPU conformance. Default behavior still warms both instances separately. The comparison checkpoint, 180 fields, full RAM/effective-hidden/register assertions and state/reset transitions remain unchanged. An actual-WASM test compares the seeded machine with a separately replayed machine before and after further fields; CI also executes the seeded authored GPU lane. Warm-up progress is journalled every 2,000 fields.

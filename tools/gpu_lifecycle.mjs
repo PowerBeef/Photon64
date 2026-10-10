@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { create, globals } from 'webgpu';
 import { gpuFixture } from './gpu_fixture.mjs';
+import { seedSoftwareCore } from './core_checkpoint.mjs';
 const native = create([]), ctx = vm.createContext({ ...globals, console, navigator: { gpu: native }, performance, Uint8Array, Uint16Array, Uint32Array, ArrayBuffer, Map, Set, Promise, Error, Math });
 const gpuSource = fs.readFileSync('src/web/gpu.js', 'utf8');
 vm.runInContext(gpuSource + '\nthis.N64Gpu=N64Gpu;', ctx);
@@ -13,6 +14,7 @@ let gpu;
 const make = flush => { const ex = new WebAssembly.Instance(wasm, { env: { host_log() {}, host_gpu_flush: flush } }).exports, ptr = ex.n64_reserve_rom(data.length); new Uint8Array(ex.memory.buffer, ptr, data.length).set(data); assert.equal(ex.n64_load(ptr, data.length), 1); return { ex, ptr }; };
 const a = make(() => gpu?.flush()), b = make(() => {}), shaders = { allowFallback: true };
 const warmup = +(process.env.GPU_WARMUP || 0), inputPath = process.env.GPU_INPUTS;
+const checkpointWarmup = process.env.GPU_WARMUP_SNAPSHOT === '1';
 const inputs = inputPath ? fs.readFileSync(inputPath,'utf8').trim() : '';
 const masks = { A:32768, B:16384, Z:8192, START:4096, DU:2048, DD:1024, DL:512, DR:256, L:32, R:16, CU:8, CD:4, CL:2, CR:1 };
 const events = inputs ? inputs.split(',').map(s => { const [f,k,d] = s.split(':'); return { f:+f, keys:k.split('+'), d:+d }; }) : [];
@@ -22,7 +24,12 @@ function input(f) {
   for(const c of [a,b])c.ex.n64_input(0,buttons,x,y);
 }
 assert.ok(Number.isSafeInteger(warmup) && warmup>=0);
-for(let f=0;f<warmup;f++) { input(f); assert.equal(a.ex.n64_frame(),0); assert.equal(b.ex.n64_frame(),0); }
+for(let f=0;f<warmup;f++) {
+  input(f); assert.equal(a.ex.n64_frame(),0);
+  if(!checkpointWarmup) assert.equal(b.ex.n64_frame(),0);
+  if((f+1)%2000===0) console.error(`Software warmup: ${f+1}/${warmup} fields`);
+}
+if(checkpointWarmup && warmup) seedSoftwareCore(a,b,data.length);
 for (const n of ['rdp', 'vi', 'merge']) shaders[n] = fs.readFileSync(`src/web/${n}.wgsl`, 'utf8');
 gpu = await ctx.N64Gpu.create(a, null, shaders); assert.ok(gpu, 'required adapter missing'); gpu.reset(); a.ex.n64_config(0, 1);
 if(process.env.GPU_LIFECYCLE_HD === '1') await gpu.setScale(0,true);
@@ -51,5 +58,5 @@ for (let i = 0; i < frames; i++) {
   if (i === 90) { a.ex.n64_reset(); b.ex.n64_reset(); gpu.reset(); a.ex.n64_config(0, 1); }
 }
 assert.ok(gpu.stats.batches > 0, 'No GPU drawing occurred; lifecycle coverage is incomplete');
-console.log(JSON.stringify({ outcome: 'PASS', fields, warmup, inputScript: inputPath || null, inputSha256: crypto.createHash('sha256').update(inputs).digest('hex'), romSha256: crypto.createHash('sha256').update(data).digest('hex'), wasmSha256: crypto.createHash('sha256').update(wasmBytes).digest('hex'), gpuSourceSha256: crypto.createHash('sha256').update(gpuSource).digest('hex'), comparedBytes: bytes, coverage: 'continuous GPU/software RAM, hidden bits and retained registers; state restore and reset', independentHardware: false, ...gpu.diagnostics() }));
+console.log(JSON.stringify({ outcome: 'PASS', fields, warmup, warmupStrategy: checkpointWarmup ? 'one software core, cloned checkpoint' : 'two software cores', inputScript: inputPath || null, inputSha256: crypto.createHash('sha256').update(inputs).digest('hex'), romSha256: crypto.createHash('sha256').update(data).digest('hex'), wasmSha256: crypto.createHash('sha256').update(wasmBytes).digest('hex'), gpuSourceSha256: crypto.createHash('sha256').update(gpuSource).digest('hex'), comparedBytes: bytes, coverage: 'continuous GPU/software RAM, hidden bits and retained registers; state restore and reset', independentHardware: false, ...gpu.diagnostics() }));
 gpu.dispose(); gpu.device.destroy(); process.exit(0);

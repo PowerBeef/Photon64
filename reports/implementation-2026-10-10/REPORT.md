@@ -129,3 +129,7 @@ Preview `v1.0.0-preview.2` selects validated source `1e8c2ea4019a152db0c17dc77ae
 - The publication workflow rejects missing/skipped/duplicate jobs, a dirty tested build, incorrect source, changed HTML or mismatched embedded/tested WASM. Notices come from the selected source SHA.
 
 The original Safari journal failure, save-generation aliasing failure, intentionally failing boundary diagnostic and optional legacy mixed-stage screenshot failures remain visible. They are not erased by the final green required matrix. Physical/hardware/provenance work listed above remains open.
+
+## Replay-tool warm-up follow-up
+
+The optional `GPU_WARMUP_SNAPSHOT=1` strategy removes duplicate software warm-up work by seeding the second instance from the same checkpoint. It does not reduce the target checkpoint or comparison fields, change inputs or weaken comparisons. Default dual-instance warm-up remains available. An actual-WASM regression compares the seeded full static state with independent replay, then checks further input-driven fields. Local JavaScript coverage is now 69 tests; the already published preview's production source remains the nine-job-green `1e8c2ea` with 68 tests at that revision. The seeded authored lane passed locally with 180 fields and 3,738 actual GPU batches; CI now also requires it. The production app is unchanged by this tooling follow-up.

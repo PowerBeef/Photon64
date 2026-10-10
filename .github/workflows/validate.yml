@@ -149,6 +149,7 @@ jobs:
           node tools/device_loss.mjs | tee out/gpu-evidence/device-loss.json
           node tools/gpu_lifecycle.mjs | tee out/gpu-evidence/lifecycle.json
           GPU_LIFECYCLE_HD=1 node tools/gpu_lifecycle.mjs | tee out/gpu-evidence/lifecycle-hd1.json
+          GPU_WARMUP=45 GPU_WARMUP_SNAPSHOT=1 node tools/gpu_lifecycle.mjs | tee out/gpu-evidence/lifecycle-checkpoint.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
