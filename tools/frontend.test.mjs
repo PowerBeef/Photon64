@@ -33,7 +33,7 @@ function environment(actual = false) {
   const hi = actual ? Array.from(new Uint32Array(ex.memory.buffer, ex.n64_host_info(), 24)) : [];
   if (!actual) { hi[12] = 4096; hi[13] = 6144; hi[14] = 137216; hi[16] = 400000; }
   Object.assign(context, { _ex: ex, _hi: hi, _db: db, _messages: messages });
-  vm.runInContext(`ex = _ex; hi = _hi; idb = Promise.resolve(_db);
+  vm.runInContext(`ex = _ex; hi = _hi; idb = Promise.resolve(_db); this.realApplyRenderer = applyRenderer;
     toast = msg => _messages.push(msg);
     for (const name of ['applyRenderer', 'resize', 'updateTouchVisibility', 'updateFlag', 'audioStart', 'audioReset', 'wakeLock', 'pokeMenu', 'closeSheet', 'renderLibrary']) eval(name + ' = () => {}');
     updateXpak = () => ({ kind: 0, now: false }); grabThumb = async () => '';
@@ -42,11 +42,28 @@ function environment(actual = false) {
       dirty: () => u32v()[hi[16] >> 2], setDirty: n => { u32v()[hi[16] >> 2] = n; },
       setDB: db => { idb = Promise.resolve(db); }, battery: () => saveBlob(),
       setBattery: b => restoreSaveBlob(b), pointer: () => romPtr,
+      setGpu: g => { gpu = g; }, rendererFailed: () => rendererFailed,
       setGet: fn => { idbGet = fn; }, setKeep: v => { settings.keep = v; } };`, context);
   return { api: context.api, ex, hi, messages, records, transactions, context,
     fail: v => { fail = v; }, hold: fn => { hold = fn; } };
 }
 const fake = (title, marker) => { const b = new Uint8Array(8192); b.set([0x80, 0x37, 0x12, 0x40]); b.set(Buffer.from(title), 0x20); b[0x10] = marker; return b; };
+
+test('actual WASM: same-cartridge replacement restores the latest battery write', async () => {
+  const e = environment(true), cartridge = fake('A', 1);
+  await e.api.loadRom(cartridge, 'A.z64');
+  const latest = e.api.battery(); latest.fill(0xA5); e.api.setBattery(latest); e.api.setDirty(9);
+  await e.api.loadRom(cartridge, 'A.z64');
+  assert.deepEqual(e.api.battery(), latest);
+  assert.deepEqual(new Uint8Array(e.records.get('save:' + e.api.getRom().key)), latest);
+});
+test('synchronous renderer initialization failure stops the session', () => {
+  const e = environment(); e.api.setRom({ key: 'A' });
+  e.api.setGpu({ reset() { throw new Error('submission failed'); } });
+  e.context.realApplyRenderer();
+  assert.equal(e.api.rendererFailed(), true); assert.equal(e.api.running(), false);
+  assert.match(e.messages.at(-1), /synchronization failed/);
+});
 
 test('transaction abort keeps dirty progress and retry commits', async () => {
   const e = environment(); e.api.setRom({ key: 'A' }); e.api.setDirty(1); e.fail(true);

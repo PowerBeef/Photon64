@@ -66,6 +66,7 @@ async function initGpu() {
 
 function applyRenderer() {
   if (busy) { busy.then(applyRenderer, rendererFailure); return; }      // (a field is waiting for GPU results: switch afterwards)
+  try {
   const want = settings.renderer !== 'sw' && !!gpu;
   $('cv-gpu').hidden = !want; $('cv-sw').hidden = want;
   if (want) {
@@ -81,6 +82,7 @@ function applyRenderer() {
   $('cv-sw').classList.toggle('px', +settings.filter === 0);
   resize();
   applyScale();
+  } catch (error) { rendererFailure(error); }
 }
 
 // internal resolution of the GPU renderer (pipelines for 2x / 4x are built on first use)
@@ -225,8 +227,9 @@ function romIdentity(data, fileName) {
 }
 async function loadRomNow(data, fileName, fromLibrary) {
   const identity = romIdentity(data, fileName);
-  const sv = await idbGet('save:' + identity.key);
   if (rom && !await flushSaves()) throw new Error('Battery save could not be stored. Export it before replacing this game.');
+  // A same-cartridge reload must read the save committed by the flush above.
+  const sv = await idbGet('save:' + identity.key);
   // One reusable maximum-size cartridge allocation. Validation and allocation
   // failure cannot overwrite the previous game; no unbounded heap growth on loads.
   const ptr = romPtr || ex.n64_alloc(MAX_ROM);
@@ -245,7 +248,10 @@ async function loadRomNow(data, fileName, fromLibrary) {
   if (sv && sv.byteLength === 0x800 + 0x20000 + 0x20000) restoreSaveBlob(new Uint8Array(sv));
   u32v()[hi[16] >> 2] = 0;
   ex.n64_config(1, +settings.cpi); ex.n64_config(5, +settings.pak); ex.n64_config(9, settings.vif ? 0 : 1);
+  rendererFailed = false;
+  if (gpuErr === 'device lost') gpu = null;
   useGpu = false; applyRenderer();
+  if (rendererFailed) throw new Error('Renderer initialization failed');
   hz = u32v()[hi[22] >> 2] === 0 ? 50 : 60;
   document.title = name + ' — Photon64';
   closeSheet(true); $('home').hidden = true; $('stage').hidden = false;
@@ -253,7 +259,7 @@ async function loadRomNow(data, fileName, fromLibrary) {
   paused = false; ffLock = false; updateFlag();
   menuThumb = '';
   audioStart(); if (actx) actx.resume().catch(() => {}); audioReset();
-  acc = 0; rendererFailed = false; wakeLock();
+  acc = 0; wakeLock();
   const xp = updateXpak();
   if (xp.kind >= 2 && xp.kind <= 3 && !xp.now) toast(`${name} ${xp.kind === 3 ? 'needs' : 'needs for some of its content'} the Expansion Pak, which is set to Removed in Settings`, 6000);
   else toast(`${name}${xp.now && xp.kind ? ' · Expansion Pak' : xp.kind === 4 && !xp.now ? ' · Expansion Pak left out' : ''}${useGpu ? '' : gpuStarting && settings.renderer !== 'sw' ? ' · software until WebGPU is ready' : ''}`, gpuStarting ? 4500 : 2200);
@@ -1039,7 +1045,7 @@ async function resetGameNow() {
   if (busy) await busy;
   romGen++; ex.n64_reset();
   if (gpuErr === 'device lost') { gpu = null; useGpu = false; ex.n64_config(0, 0); applyRenderer(); }
-  else if (useGpu) gpu.reset();
+  else if (useGpu) { try { gpu.reset(); } catch (error) { rendererFailure(error); return false; } }
   rendererFailed = false;
   updateXpak(); audioReset(); closeSheet(); togglePause(false); toast('Game reset');
 }
