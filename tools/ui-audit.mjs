@@ -39,8 +39,11 @@ export async function auditUi() {
     }
     if (cv.width > 4096 || cv.height > 4096) errors.push('GPU presentation exceeds backing-store limit');
     if (Math.abs(cv.width * screen.clientHeight - cv.height * screen.clientWidth) > screen.clientHeight + screen.clientWidth) errors.push('GPU canvas changes display aspect ratio');
-    const sw = document.getElementById('cv-sw'), r = rect(sw);
+    const sw = document.getElementById('cv-sw'), r = rect(sw), sr = rect(screen);
     if (!window.__photon.settings.aspect && Math.abs(r.width * 3 - r.height * 4) > 2) errors.push('Software picture changes 4:3 aspect ratio');
+    if (window.__photon.settings.aspect && (Math.abs(r.width - sr.width) > epsilon || Math.abs(r.height - sr.height) > epsilon)) errors.push('Stretch does not fill picture area');
+    if (Math.abs(r.x + r.right - sr.x - sr.right) > epsilon || Math.abs(r.y + r.bottom - sr.y - sr.bottom) > epsilon) errors.push('Software picture is not centered');
+    if (r.x < sr.x - epsilon || r.right > sr.right + epsilon || r.y < sr.y - epsilon || r.bottom > sr.bottom + epsilon) errors.push('Software picture extends outside screen');
   }
   return { errors: [...new Set(errors)], viewport: [innerWidth, innerHeight], dpr: devicePixelRatio, body, panel: open ? rect(dialog) : null, controls: controls.length, gpuCanvas: [cv.width, cv.height], screen: [screen.clientWidth, screen.clientHeight] };
 }

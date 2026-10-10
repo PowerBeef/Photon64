@@ -40,6 +40,7 @@ try {
       }
     });
     const page = await context.newPage();
+    const field = () => page.evaluate(() => new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[21], 8)[0]);
     page.on('pageerror', e => report.errors.push(name + ': ' + e.message));
     const check = async phase => {
       const result = await page.evaluate(auditUi); row.phases.push({ phase, ...result });
@@ -67,7 +68,7 @@ try {
       assert.ok(await page.locator('#h-set').evaluate(e => e === document.activeElement));
       await page.setInputFiles('#file', { name: 'A very long homebrew cartridge filename to exercise title truncation.N64', mimeType: 'application/octet-stream', buffer: rom });
       await page.waitForFunction(() => !!window.__photon.rom);
-      await page.waitForFunction(() => window.__photon.perf.frames > 2);
+      await page.waitForFunction(() => new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[21], 8)[0] > 2);
       if (mobile) {
         const a = await page.locator('#touch .t[data-b=A]').boundingBox();
         await page.evaluate(({ x, y }) => document.getElementById('stage').dispatchEvent(new PointerEvent('pointerdown', { pointerId: 77, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, cancelable: true })), { x: a.x + a.width / 2, y: a.y + a.height / 2 });
@@ -75,8 +76,8 @@ try {
       }
       await click('#b-menu'); await check('game-menu'); await shot('menu');
       assert.deepEqual(await page.evaluate(() => ({ ...window.__photon.touchState })), { buttons: 0, x: 0, y: 0 }, 'Menu must release held input');
-      const fields = await page.evaluate(() => window.__photon.perf.frames);
-      await page.waitForTimeout(100); assert.equal(await page.evaluate(() => window.__photon.perf.frames), fields, 'Menu must pause emulation');
+      const fields = await field();
+      await page.waitForTimeout(100); assert.equal(await field(), fields, 'Menu must pause emulation');
       await click('#m-save'); await check('save-states'); await shot('states');
       await page.keyboard.press('Escape');
       await click('#m-load'); await check('load-states'); await page.keyboard.press('Escape');
@@ -84,6 +85,8 @@ try {
       for (const tab of ['video', 'console', 'pad', 'data']) {
         await click('#tab-' + tab); await check('settings-' + tab); await shot(tab);
       }
+      await click('#tab-video'); await click('#s-aspect + .seg button:nth-child(2)'); await check('stretch-picture');
+      await click('#s-aspect + .seg button:nth-child(1)'); await check('letterboxed-picture');
       if (mobile || name === 'short-window') {
         await click('#tab-pad'); await click('#s-touch + .seg button:nth-child(2)');
         for (const [sizeKey, heightKey, dpad] of [['Home', 'Home', false], ['End', 'Home', true], ['End', 'End', false]]) {
@@ -104,7 +107,7 @@ try {
         await click('#m-full'); await page.waitForFunction(() => document.getElementById('toast').textContent.includes('Full screen is unavailable'));
         assert.equal(await page.locator('#sheet').isVisible(), true);
       }
-      await click('#m-resume'); await page.waitForFunction(n => window.__photon.perf.frames > n, fields);
+      await click('#m-resume'); await page.waitForFunction(n => new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[21], 8)[0] > n, fields);
       // Audit stage canvas sizing too; auditUi uses the hidden home only for its control list.
       await check('resumed-stage');
       if (mobile) {

@@ -8,7 +8,9 @@ import assert from 'node:assert/strict';
 import { auditUi } from './ui-audit.mjs';
 const evidence = process.env.UI_EVIDENCE || 'out/safari-evidence'; fs.mkdirSync(evidence, { recursive: true });
 const report = { outcome: 'FAIL', browser: 'native Safari', cases: [], driverLog: '', limitations: 'macOS Safari only. Window dimensions may be clamped by Safari or the hosted display; actual CSS viewport is recorded. No connected iOS device or mobile GPU claim.' };
-const html = fs.readFileSync('out/photon64.html'), rom = fs.readFileSync(process.argv[2] || 'testroms/RSPCP2VRCP.N64').toString('base64');
+const html = fs.readFileSync('out/photon64.html');
+const uploadPath = path.resolve('out/Safari-homebrew-with-a-deliberately-long-cartridge-filename.N64');
+fs.copyFileSync(process.argv[2] || 'testroms/RSPCP2VRCP.N64', uploadPath);
 const server = http.createServer((_, res) => { res.setHeader('Content-Type', 'text/html'); res.end(html); });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
 const port = +(process.env.SAFARI_DRIVER_PORT || 5001), driver = spawn('/usr/bin/safaridriver', ['--port', String(port)]);
@@ -74,16 +76,23 @@ try {
     await evaluate(() => document.querySelector('#s-pak + .seg [aria-checked=true]').focus()); await key('\uE014');
     assert.equal(await evaluate(() => document.getElementById('s-pak').value), name === 'narrow' ? '2' : name === 'landscape' ? '0' : '1');
     await key('\uE00C'); assert.ok(await evaluate(() => document.activeElement.id === 'h-set'));
-    await evaluateAsync(async b64 => { const p = window.__photon; p.settings.renderer = 'sw'; await p.loadRom(Uint8Array.from(atob(b64), c => c.charCodeAt(0)), 'Safari homebrew with a deliberately long title.N64'); }, rom);
-    await wait(() => window.__photon.perf.frames > 2);
+    await evaluate(() => window.__photon.settings.renderer = 'sw');
+    const input = await cmd('POST', '/element', { using: 'css selector', value: '#file' });
+    await cmd('POST', `/element/${input['element-6066-11e4-a52e-4f735466cecf']}/value`, { text: uploadPath });
+    await wait(() => !!window.__photon.rom && new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[21], 8)[0] > 2);
     await click('#b-menu'); await check('game-menu'); await shot(name + '-menu');
-    const fields = await evaluate(() => window.__photon.perf.frames); await delay(150); assert.equal(await evaluate(() => window.__photon.perf.frames), fields);
+    const fields = await evaluate(() => new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[21], 8)[0]); await delay(150);
+    assert.equal(await evaluate(() => new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[21], 8)[0]), fields);
     await click('#m-save'); await check('save-states'); await key('\uE00C');
     await click('#m-load'); await check('load-states'); await key('\uE00C');
     await click('#m-set');
     for (const tab of ['video', 'console', 'pad', 'data']) { await click('#tab-' + tab); await check('settings-' + tab); await shot(name + '-' + tab); }
     await key('\uE00C'); assert.ok(await evaluate(() => document.activeElement.id === 'm-set'));
     await click('#m-resume'); await wait(() => document.getElementById('sheet').hidden);
+    assert.ok(await evaluateAsync(async n => {
+      for (let i = 0; i < 120; i++) { if (new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[21], 8)[0] > n) return true; await new Promise(r => setTimeout(r, 50)); }
+      return false;
+    }, fields), 'Resume must advance emulated fields');
     await check('stage');
     assert.equal(await evaluateAsync(() => window.__photon.saveState(0, '')), true);
     assert.equal(await evaluateAsync(() => window.__photon.loadState(0)), true);
