@@ -1,13 +1,13 @@
 ![Photon64 — a Nintendo 64 emulator for the browser](assets/banner.png)
 
 A Nintendo 64 emulator that runs entirely in the browser: a C core compiled to
-WebAssembly, a WebGPU renderer with an exact software fallback, shipped as one
+WebAssembly, a WebGPU renderer with a software fallback, shipped as one
 self-contained HTML file. No server, no install — open it and drop in a ROM.
 
 ## Features
 
 - Cycle-minded C core (CPU, RSP, RDP, VI) running as SIMD128 WebAssembly
-- WebGPU renderer for speed, pixel-exact software renderer as fallback
+- WebGPU renderer and integer software fallback; accuracy validation is ongoing
 - Single-file app: game library, drag-and-drop (including `.zip`), save states
 - Full input: remappable keyboard, gamepads, and touch controls
 - Differential test suite: software renderer checked against Angrylion,
@@ -38,6 +38,8 @@ Default keyboard layout (remappable in Settings):
 | Menu | Esc |
 
 ## Building from source
+
+For pinned Linux/macOS tooling and validation, see [DEVELOPMENT.md](DEVELOPMENT.md) and [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
 Prerequisites (macOS): `brew install llvm lld`, Node 24+, Python 3 with
 `pillow numpy scipy` (`tools/requirements.txt`), and your own ROM dumps — see
