@@ -57,7 +57,7 @@ try {
   assert.equal(await page.evaluate(async () => {
     const p = window.__photon; p.setPaused(true);
     new Uint8Array(p.ex.memory.buffer)[p.hi[12]] = 0x5A;
-    new Uint32Array(p.ex.memory.buffer)[p.hi[16] >> 2] = 1;
+    const generation = new Uint32Array(p.ex.memory.buffer, p.hi[16], 1); generation[0] = (generation[0] + 1) >>> 0 || 1;
     return await p.flushSaves();
   }), true);
   await page.reload(); await page.waitForFunction(() => window.__photon?.ex);

@@ -1,0 +1,53 @@
+{
+  "source": "6cb5ecff84468d59bd3a57beaa9cdd72a5e9d21a",
+  "runId": 38087127723,
+  "jobs": [
+    {
+      "name": "baseline",
+      "id": 114315865414,
+      "conclusion": "success"
+    },
+    {
+      "name": "safari",
+      "id": 114316266733,
+      "conclusion": "failure"
+    },
+    {
+      "name": "gpu",
+      "id": 114316266758,
+      "conclusion": "success"
+    },
+    {
+      "name": "browser-webkit-default-mobile-0",
+      "id": 114316266780,
+      "conclusion": "success"
+    },
+    {
+      "name": "browser-chromium-default-mobile-1",
+      "id": 114316266785,
+      "conclusion": "success"
+    },
+    {
+      "name": "browser-chromium-chrome-mobile-0",
+      "id": 114316266800,
+      "conclusion": "success"
+    },
+    {
+      "name": "browser-chromium-msedge-mobile-0",
+      "id": 114316266824,
+      "conclusion": "success"
+    },
+    {
+      "name": "browser-webkit-default-mobile-1",
+      "id": 114316266836,
+      "conclusion": "success"
+    },
+    {
+      "name": "browser-chromium-default-mobile-0",
+      "id": 114316266850,
+      "conclusion": "success"
+    }
+  ],
+  "outcome": "FAIL",
+  "note": "Native Safari third sequence save generation reuse reproduced in actual WASM; retained before harness correction."
+}

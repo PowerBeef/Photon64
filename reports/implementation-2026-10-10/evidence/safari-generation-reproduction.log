@@ -1,0 +1,28 @@
+✖ actual WASM: a guest write after restored-state autosave remains durable (892.085471ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1009.575192
+
+✖ failing tests:
+
+test at tools/frontend.test.mjs:171:1
+✖ actual WASM: a guest write after restored-state autosave remains durable (892.085471ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 90
+
+      at TestContext.<anonymous> (file:///workspace/scratch/86ce5dc0a4fd/Photon64/tools/frontend.test.mjs:184:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 90,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

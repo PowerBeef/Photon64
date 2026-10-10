@@ -168,6 +168,21 @@ test('actual WASM: state restore drains older saves and makes restored battery d
   assert.equal(e.api.dirty(), 1); assert.equal(e.api.battery()[0], 0x11); await e.api.flushSaves();
   await e.api.loadRom(fake('state', 1), 'state.z64'); assert.equal(e.api.battery()[0], 0x11);
 });
+test('actual WASM: a guest write after restored-state autosave remains durable', async () => {
+  const e = environment(true), cartridge = fake('restore-write', 1);
+  await e.api.loadRom(cartridge, 'restore-write.z64');
+  const bytes = e.api.battery(); bytes.fill(0); e.api.setBattery(bytes);
+  await e.api.saveState(); assert.equal(await e.api.loadState(), true);
+  assert.equal(e.api.dirty(), 1);
+  let commit; e.hold(fn => { commit = fn; }); const pending = e.api.flushSaves(); await turn();
+  assert.equal(e.transactions.at(-1)[0][1].byteLength, 0x40800);
+  new Uint8Array(e.ex.memory.buffer)[e.hi[12]] = 0x5A;
+  // Same monotonic, nonzero generation contract as the guest EEPROM command.
+  e.api.setDirty((e.api.dirty() + 1) >>> 0 || 1);
+  commit(); await pending; e.hold(null); await e.api.flushSaves();
+  await e.api.loadRom(cartridge, 'restore-write.z64');
+  assert.equal(e.api.battery()[0], 0x5A);
+});
 test('canonical SHA256 matches independent digest across byte orders and payload variants', async () => {
   const e = environment(), a = fake('same', 7), expected = createHash('sha256').update(a).digest('hex');
   for (const xor of [0, 1, 3]) { const swapped = Uint8Array.from(a, (_, i) => a[i ^ xor]); assert.equal(await e.api.romDigest(swapped), expected); }

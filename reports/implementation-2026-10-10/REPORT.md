@@ -1,6 +1,6 @@
 # Photon64 audit implementation: changes, acceptance and remaining gates
 
-**Date:** 10 October 2026. **Frozen audit:** [`96a7f07`](../audit-2026-10-10/REPORT.md). **Implementation commits:** `6d8a9e1` (correctness/product/CI), `228a4db` (Safari journal regression, five-sequence gate, full diagnostic identity). Subsequent source/evidence changes are recorded in git history and the evidence manifest. This report tracks implementation; it does not overwrite the original audit or reinterpret its failures as passes.
+**Date:** 10 October 2026. **Frozen audit:** [`96a7f07`](../audit-2026-10-10/REPORT.md). **Implementation commits:** `6d8a9e1` (correctness/product/CI), `228a4db` (Safari journal regression, five-sequence gate, full diagnostic identity). Subsequent source/evidence changes are recorded in git history and individual CI records. This report tracks implementation; it does not overwrite the original audit or reinterpret its failures as passes.
 
 ## Delivery status
 
@@ -59,14 +59,14 @@ Four standard gamepads use stable index/ID slots, per-port presence/pak/rumble a
 
 | Lane | Observation | Scope |
 |---|---|---|
-| Local JavaScript | 15 legacy validation checks + 67 Node tests pass | Actual WASM persistence/memory plus mocked browser/GPU failure ordering. Final CI can include later added regressions. |
+| Local JavaScript | 15 legacy validation checks + 68 Node tests pass | Actual WASM persistence/memory plus mocked browser/GPU failure ordering. Final CI can include later added regressions. |
 | Native / WASM baseline | 11,912 core assertions; ASan/UBSan; identical O0/O3; 958,565 oracle coordinate/write assertions pass | Five independent raw fixtures have zero differences; five VI fixtures each compare 95 fields/29,184,000 RGB pixels with zero differences under declared reference policy. |
 | Real GPU vectors | Fourteen batches native and full-storage HD-at-1x pass; twelve retained registers per batch | Twelve independently compared stream batches plus two C/WGSL-only circular boundary batches. Not a full machine-state comparison. |
 | Real device loss | Loss barrier/reset reject as required | Dawn + Mesa llvmpipe software Vulkan, not physical driver coverage. |
 | Authored continuous lifecycle | 180 fields, 3,752 GPU batches, 2,264,924,160 compared RAM/hidden bytes, state restore and reset pass | Native and full-storage HD-at-1x. Real drawing, CPU reads and partial writes. Hidden comparison uses effective ownership/shadow semantics, not stale backing bytes. |
 | Hosted `228a4db` | All nine required jobs passed, including six desktop/mobile browser variants and native Safari | Exact source `228a4db`; later changes require their own final CI gate. Status retained in `evidence/ci-status.json`. |
 
-The [evidence directory](evidence/) retains synthetic/homebrew logs and CI status. Commercial-derived results remain private after automatic publication review rejected public disclosure; source changes and noncommercial evidence are unaffected. Commercial cartridge inventory, hashes and execution evidence are retained privately and excluded from public repository artifacts. Baseline and initial GPU checks were taken during source development with dirty working state; the manifest records source file/core hashes. Hosted validation is the exact-commit authority. A later frontend-only change does not reclassify an earlier C baseline as a fresh full run.
+The [evidence directory](evidence/) retains synthetic/homebrew logs and CI status. Commercial-derived results remain private after automatic publication review rejected public disclosure; source changes and noncommercial evidence are unaffected. Commercial cartridge inventory, hashes and execution evidence are retained privately and excluded from public repository artifacts. Baseline and initial GPU checks were taken during source development with dirty working state; individual logs record source file/core hashes. Hosted validation is the exact-commit authority. A later frontend-only change does not reclassify an earlier C baseline as a fresh full run.
 
 ## New boundary finding retained during implementation
 
@@ -101,3 +101,7 @@ RDP_BOUNDARY_DIAGNOSTIC=1 ./out/oracle_test # deliberately nonzero while disagre
 ```
 
 `tools/filecheck.mjs` runs only on an authorized browser runner; the local Chromium restriction in `AGENTS.md` is unchanged. Native Safari uses Apple's driver on the disposable macOS CI runner. Device permissions and physical evidence are never substituted with viewport emulation or lavapipe timing.
+
+## Final-candidate Safari save-generation regression
+
+Candidate `6cb5ecf` passed eight of nine required CI jobs in run `38087127723`; native Safari failed its third sequence with battery byte `0` instead of `90`. The test directly changed EEPROM but assigned dirty generation `1`, reusing the restored state's generation while an older autosave could still be pending. That violates the guest's nonzero monotonic write-generation contract. A held-transaction actual-WASM regression reproduces the same assertion; its first failure is retained in `evidence/safari-generation-reproduction.log`. The harnesses now increment the generation exactly as guest EEPROM writes do. The corrected regression retains the byte-for-byte durable reload assertion; all 68 Node tests pass. The failed CI attempt is retained; final corrected-source native Safari validation is still required before publication.

@@ -154,7 +154,7 @@ try {
     assert.equal(await evaluateAsync(async () => {
       const p = window.__photon; p.setPaused(true);
       new Uint8Array(p.ex.memory.buffer)[p.hi[12]] = 0x5A;
-      new Uint32Array(p.ex.memory.buffer)[p.hi[16] >> 2] = 1; return p.flushSaves();
+      const generation = new Uint32Array(p.ex.memory.buffer, p.hi[16], 1); generation[0] = (generation[0] + 1) >>> 0 || 1; return p.flushSaves();
     }), true);
     await click('#b-menu'); await click('#m-home'); await wait(() => !!document.querySelector('#lib .cart:not(.add)'));
     assert.deepEqual(await evaluate(() => window.__uiErrors), []);
