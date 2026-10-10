@@ -308,23 +308,6 @@ static void cop0_exec(u32 op) {
 // ---------------------------------------------------------------------------
 // COP1
 // ---------------------------------------------------------------------------
-#ifdef __wasm__
-#define f_sqrt __builtin_sqrt
-#define f_sqrtf __builtin_sqrtf
-#define f_rint __builtin_rint
-#define f_trunc __builtin_trunc
-#define f_floor __builtin_floor
-#define f_ceil __builtin_ceil
-#else
-#include <math.h>
-#define f_sqrt sqrt
-#define f_sqrtf sqrtf
-#define f_rint nearbyint
-#define f_trunc trunc
-#define f_floor floor
-#define f_ceil ceil
-#endif
-
 #define XFER32(i) (((u32 *)&cpu.f[(i) & cpu.fmask]) + ((i) & ~cpu.fmask & 1))
 #define XFER64(i) (&cpu.f[(i) & cpu.fmask])
 #define SRC_S(i) (cpu.f[(i) & cpu.fmask].f)
@@ -336,21 +319,11 @@ static void cop0_exec(u32 op) {
 #define DST_W(i, v) do { s32 _v = (v); cpu.f[i].u = (u32)_v; } while (0)
 #define DST_L(i, v) do { cpu.f[i].s = (v); } while (0)
 
-// FCR31 exception model (cause 12-17: I U O Z V E, enables 7-11, flags 2-6), following hardware behaviour:
-// subnormal / quiet-NaN inputs and out-of-range conversions raise the unmaskable "unimplemented operation".
+// VR4300 FCR31: I/U/O/Z/V causes 12..16, enables 7..11, sticky flags 2..6.
+// SoftFloat supplies rounded IEEE bits; this wrapper owns legacy NaNs and E traps.
 enum { FE_I, FE_U, FE_O, FE_Z, FE_V };
 static inline int fpe_set(int c) { cpu.fcr31 |= 1u << (12 + c); if (cpu.fcr31 & (1u << (7 + c))) return 1; cpu.fcr31 |= 1u << (2 + c); return 0; }
 #define FPE_UNIMPL() do { cpu.fcr31 |= 1u << 17; cpu_exception(EXC_FPE, 0); return; } while (0)
-#define FPE_IF(c) do { if (c) { cpu_exception(EXC_FPE, 0); return; } } while (0)
-
-static inline double fp_round(double d, u32 mode) {
-  switch (mode & 3) {
-    case 0: return f_rint(d);
-    case 1: return f_trunc(d);
-    case 2: return f_ceil(d);
-    default: return f_floor(d);
-  }
-}
 static inline u32 f32_bits(float f) { union { float f; u32 u; } v; v.f = f; return v.u; }
 static inline u64 f64_bits(double d) { union { double d; u64 u; } v; v.d = d; return v.u; }
 static inline int f32_class(float f) {   // 0 normal/zero/inf, 1 subnormal, 2 quiet NaN (MIPS legacy), 3 signaling NaN
@@ -365,97 +338,50 @@ static inline int f64_class(double d) {
   if (e == 0x7FF && m) return (u & 0x8000000000000ull) ? 3 : 2;
   return 0;
 }
-static inline void two_prod(double a, double b, double *p, double *e) {
-  const double C = 134217729.0;
-  double ac = a * C, ah = ac - (ac - a), al = a - ah;
-  double bc = b * C, bh = bc - (bc - b), bl = b - bh;
-  *p = a * b; *e = ((ah * bh - *p) + ah * bl + al * bh) + al * bl;
-}
-static inline float fp_flush_f(float f, u32 rm) {
-  int neg = (f32_bits(f) >> 31) != 0;
-  union { u32 u; float f; } mn = { 0x00800000u | (neg ? 0x80000000u : 0) }, z = { neg ? 0x80000000u : 0 };
-  if ((rm & 3) == 2) return neg ? z.f : mn.f;
-  if ((rm & 3) == 3) return neg ? mn.f : z.f;
-  return z.f;
-}
-static inline double fp_flush_d(double d, u32 rm) {
-  int neg = (f64_bits(d) >> 63) != 0;
-  union { u64 u; double d; } mn = { 0x0010000000000000ull | (neg ? 0x8000000000000000ull : 0) }, z = { neg ? 0x8000000000000000ull : 0 };
-  if ((rm & 3) == 2) return neg ? z.d : mn.d;
-  if ((rm & 3) == 3) return neg ? mn.d : z.d;
-  return z.d;
-}
 
-static inline void fp_cmp(u32 cond, int unord, int eq, int lt) {
-  int r = ((cond & 1) && unord) || ((cond & 2) && eq) || ((cond & 4) && lt);
-  if (r) cpu.fcr31 |= 1u << 23; else cpu.fcr31 &= ~(1u << 23);
+static inline u32 fp_mode(u32 mode) {
+  static const u8 modes[4] = { softfloat_round_near_even, softfloat_round_minMag, softfloat_round_max, softfloat_round_min };
+  return modes[mode & 3];
 }
-
-// Shared tail of arithmetic results: maps IEEE outcomes onto the VR4300's flags/traps. Returns 1 if a trap was taken.
-static int fp_finish_s(float *res, int nan_in, int divz, int inexact, int tiny, int finite_in) {
-  float f = *res;
-  u32 u = f32_bits(f), e = (u >> 23) & 0xFF, m = u & 0x7FFFFF;
+static void fp_begin(void) {
+  cpu.fcr31 &= ~0x3F000u;
+  softfloat_roundingMode = fp_mode(cpu.fcr31);
+  softfloat_detectTininess = softfloat_tininess_afterRounding;
+  softfloat_exceptionFlags = 0;
+}
+static int fp_inputs(int a, int b, int *nan) {
+  if (a == 1 || a == 2 || b == 1 || b == 2) {
+    cpu.fcr31 |= 1u << 17; cpu_exception(EXC_FPE, 0); return 1;
+  }
+  if (a == 3 || b == 3) {
+    if (fpe_set(FE_V)) { cpu_exception(EXC_FPE, 0); return 1; }
+    *nan = 1;
+  }
+  return 0;
+}
+static int fp_flags(void) {
   int trap = 0;
-  if (divz) trap |= fpe_set(FE_Z);
-  if (e == 0xFF && !divz && !nan_in) {
-    if (m) trap |= fpe_set(FE_V); else if (finite_in) { trap |= fpe_set(FE_O); trap |= fpe_set(FE_I); }
-  } else if ((e == 0 && m) || tiny) {
-    if (!(cpu.fcr31 & (1u << 24)) || (cpu.fcr31 & 0x180)) { cpu.fcr31 |= 1u << 17; cpu_exception(EXC_FPE, 0); return 1; }
-    fpe_set(FE_U); fpe_set(FE_I);
-    if (e == 0 && m) *res = fp_flush_f(f, cpu.fcr31);
-  } else if (inexact) trap |= fpe_set(FE_I);
-  if (trap) { cpu_exception(EXC_FPE, 0); return 1; }
-  if (e == 0xFF && m) { union { u32 u; float f; } n = { 0x7FBFFFFF }; *res = n.f; }
+  for (int i = 0; i < 5; i++) if (softfloat_exceptionFlags & (1u << i)) trap |= fpe_set(i);
+  if (trap) cpu_exception(EXC_FPE, 0);
+  return trap;
+}
+static int fp_result(u64 *bits, int single) {
+  u64 sign = *bits & (single ? 0x80000000ull : 0x8000000000000000ull);
+  u64 exponent = single ? 0x7F800000ull : 0x7FF0000000000000ull;
+  u64 fraction = single ? 0x007FFFFFull : 0x000FFFFFFFFFFFFFull;
+  int denormal = !(*bits & exponent) && (*bits & fraction);
+  if (denormal || (softfloat_exceptionFlags & softfloat_flag_underflow)) {
+    if (!(cpu.fcr31 & (1u << 24)) || (cpu.fcr31 & 0x180)) {
+      cpu.fcr31 |= 1u << 17; cpu_exception(EXC_FPE, 0); return 1;
+    }
+    softfloat_exceptionFlags = softfloat_flag_underflow | softfloat_flag_inexact;
+    u32 rm = cpu.fcr31 & 3;
+    *bits = sign | (((rm == 2 && !sign) || (rm == 3 && sign)) ? (single ? 0x00800000ull : 0x0010000000000000ull) : 0);
+  }
+  if (fp_flags()) return 1;
+  if ((*bits & exponent) == exponent && (*bits & fraction)) *bits = single ? 0x7FBFFFFFull : 0x7FF7FFFFFFFFFFFFull;
   return 0;
 }
-static int fp_finish_d(double *res, int nan_in, int divz, int inexact, int tiny, int finite_in) {
-  double d = *res;
-  u64 u = f64_bits(d); u32 e = (u32)(u >> 52) & 0x7FF; u64 m = u & 0xFFFFFFFFFFFFFull;
-  int trap = 0;
-  if (divz) trap |= fpe_set(FE_Z);
-  if (e == 0x7FF && !divz && !nan_in) {
-    if (m) trap |= fpe_set(FE_V); else if (finite_in) { trap |= fpe_set(FE_O); trap |= fpe_set(FE_I); }
-  } else if ((e == 0 && m) || tiny) {
-    if (!(cpu.fcr31 & (1u << 24)) || (cpu.fcr31 & 0x180)) { cpu.fcr31 |= 1u << 17; cpu_exception(EXC_FPE, 0); return 1; }
-    fpe_set(FE_U); fpe_set(FE_I);
-    if (e == 0 && m) *res = fp_flush_d(d, cpu.fcr31);
-  } else if (inexact) trap |= fpe_set(FE_I);
-  if (trap) { cpu_exception(EXC_FPE, 0); return 1; }
-  if (e == 0x7FF && m) { union { u64 u; double d; } n = { 0x7FF7FFFFFFFFFFFFull }; *res = n.d; }
-  return 0;
-}
-
-// input screening; returns 1 if trapped. *nan set when an (untrapped) signaling NaN is present.
-static int fp_in1(int cls, int *nan) {
-  if (cls == 1 || cls == 2) { cpu.fcr31 |= 1u << 17; cpu_exception(EXC_FPE, 0); return 1; }
-  if (cls == 3) { if (fpe_set(FE_V)) { cpu_exception(EXC_FPE, 0); return 1; } *nan = 1; }
-  return 0;
-}
-static int fp_in2(int c1, int c2, int *nan) {
-  if (c1 == 2 || c2 == 2 || c1 == 1 || c2 == 1) { cpu.fcr31 |= 1u << 17; cpu_exception(EXC_FPE, 0); return 1; }
-  if (c1 == 3 || c2 == 3) { if (fpe_set(FE_V)) { cpu_exception(EXC_FPE, 0); return 1; } *nan = 1; }
-  return 0;
-}
-
-// float -> integer conversions
-static int fp_conv_w(double d, int cls, u32 mode, s32 *out) {
-  u64 u = f64_bits(d);
-  if (cls || ((u >> 52) & 0x7FF) == 0x7FF || !(d < 2147483648.0 && d >= -2147483648.0)) { cpu.fcr31 |= 1u << 17; cpu_exception(EXC_FPE, 0); return 1; }
-  double r = fp_round(d, mode);
-  if (!(r < 2147483648.0 && r >= -2147483648.0)) { cpu.fcr31 |= 1u << 17; cpu_exception(EXC_FPE, 0); return 1; }
-  if (r != d && fpe_set(FE_I)) { cpu_exception(EXC_FPE, 0); return 1; }
-  *out = (s32)r;
-  return 0;
-}
-static int fp_conv_l(double d, int cls, u32 mode, s64 *out) {
-  u64 u = f64_bits(d);
-  if (cls || ((u >> 52) & 0x7FF) == 0x7FF || !(d < 9007199254740992.0 && d > -9007199254740992.0)) { cpu.fcr31 |= 1u << 17; cpu_exception(EXC_FPE, 0); return 1; }
-  double r = fp_round(d, mode);
-  if (r != d && fpe_set(FE_I)) { cpu_exception(EXC_FPE, 0); return 1; }
-  *out = (s64)r;
-  return 0;
-}
-
 static NOINLINE void cop1_exec(u32 op) {
   u32 rs = (op >> 21) & 31, rt = (op >> 16) & 31, fs = (op >> 11) & 31, fd = (op >> 6) & 31, fn = op & 0x3F;
   switch (rs) {
@@ -484,136 +410,76 @@ static NOINLINE void cop1_exec(u32 op) {
       else cpu.branch = 1;
       return;
     }
-    case 16: {                                                         // S
-      float a = SRC_S(fs), b = SRC_S(rt), r;
-      int nan = 0;
-      if (fn == 6) { cpu.f[fd].u = XFER64(fs)->u; return; }           // MOV.S copies the full register
-      cpu.fcr31 &= ~0x3F000u;
-      if (fn >= 48) {
-        int na = a != a, nb = b != b;
-        if (na || nb) {
-          int quiet = !(fn & 8);
-          if (na && (!quiet || f32_class(a) == 3) && fpe_set(FE_V)) { cpu_exception(EXC_FPE, 0); return; }
-          if (nb && (!quiet || f32_class(b) == 3) && fpe_set(FE_V)) { cpu_exception(EXC_FPE, 0); return; }
-        }
-        fp_cmp(fn & 15, na || nb, a == b, a < b);
-        return;
-      }
-      switch (fn) {
-        case 0: case 1: case 2: case 3: {
-          if (fp_in2(f32_class(a), f32_class(b), &nan)) return;
-          int afin = (f32_bits(a) & 0x7F800000u) != 0x7F800000u, bfin = (f32_bits(b) & 0x7F800000u) != 0x7F800000u;
-          double da = a, db = b, d; int inexact = 0, divz = 0, tiny = 0;
-          if (fn == 0 || fn == 1) {
-            if (fn == 1) db = -db;
-            d = da + db; r = (float)d;
-            double bb = d - da, err = (da - (d - bb)) + (db - bb);
-            inexact = (double)r != d || err != 0;
-          } else if (fn == 2) { d = da * db; r = (float)d; inexact = (double)r != d; tiny = r == 0 && a != 0 && b != 0; }
-          else {
-            d = da / db; r = (float)d;
-            divz = b == 0 && a != 0 && (f32_bits(a) & 0x7F800000) != 0x7F800000;
-            inexact = !divz && (f32_bits(r) & 0x7F800000) != 0x7F800000 && (double)r * db != da;
-            tiny = r == 0 && a != 0 && (f32_bits(b) & 0x7F800000) != 0x7F800000;
-          }
-          if (fp_finish_s(&r, nan, divz, inexact, tiny, afin && bfin)) return;
-          DST_S(fd, r); return;
-        }
-        case 4:
-          if (fp_in1(f32_class(a), &nan)) return;
-          r = f_sqrtf(a);
-          if (fp_finish_s(&r, nan, 0, r == r && (double)r * (double)r != (double)a, 0, (f32_bits(a) & 0x7F800000u) != 0x7F800000u)) return;
-          DST_S(fd, r); return;
-        case 5: case 7:
-          if (fp_in1(f32_class(a), &nan)) return;
-          r = fn == 5 ? __builtin_fabsf(a) : -a;
-          if (fp_finish_s(&r, nan, 0, 0, 0, (f32_bits(a) & 0x7F800000u) != 0x7F800000u)) return;
-          DST_S(fd, r); return;
-        case 8: case 9: case 10: case 11: case 37: { s64 v; if (fp_conv_l(a, f32_class(a), fn == 37 ? cpu.fcr31 : fn, &v)) return; DST_L(fd, v); return; }
-        case 12: case 13: case 14: case 15: case 36: { s32 v; if (fp_conv_w(a, f32_class(a), fn == 36 ? cpu.fcr31 : fn, &v)) return; DST_W(fd, v); return; }
-        case 33: { if (fp_in1(f32_class(a), &nan)) return; double d = (double)a; if (fp_finish_d(&d, nan, 0, 0, 0, (f32_bits(a) & 0x7F800000u) != 0x7F800000u)) return; DST_D(fd, d); return; }
-        default: FPE_UNIMPL();
-      }
-    }
-    case 17: {                                                         // D
-      double a = SRC_D(fs), b = SRC_D(rt), r;
-      int nan = 0;
+    case 16: case 17: {
+      int single = rs == 16;
       if (fn == 6) { cpu.f[fd].u = XFER64(fs)->u; return; }
-      cpu.fcr31 &= ~0x3F000u;
+      fp_begin();
+      u64 a = single ? cpu.f[fs & cpu.fmask].lo : cpu.f[fs & cpu.fmask].u;
+      u64 b = single ? cpu.f[rt & cpu.fmask].lo : cpu.f[rt & cpu.fmask].u;
+      int ca = single ? f32_class(SRC_S(fs)) : f64_class(SRC_D(fs));
+      int cb = single ? f32_class(SRC_S(rt)) : f64_class(SRC_D(rt));
       if (fn >= 48) {
-        int na = a != a, nb = b != b;
-        if (na || nb) {
-          int quiet = !(fn & 8);
-          if (na && (!quiet || f64_class(a) == 3) && fpe_set(FE_V)) { cpu_exception(EXC_FPE, 0); return; }
-          if (nb && (!quiet || f64_class(b) == 3) && fpe_set(FE_V)) { cpu_exception(EXC_FPE, 0); return; }
-        }
-        fp_cmp(fn & 15, na || nb, a == b, a < b);
+        int na = ca >= 2, nb = cb >= 2;
+        if ((ca == 3 || cb == 3 || ((fn & 8) && (na || nb))) && fpe_set(FE_V)) { cpu_exception(EXC_FPE, 0); return; }
+        int eq = single ? SRC_S(fs) == SRC_S(rt) : SRC_D(fs) == SRC_D(rt);
+        int lt = single ? SRC_S(fs) < SRC_S(rt) : SRC_D(fs) < SRC_D(rt);
+        int cond = fn & 15;
+        if (((cond & 1) && (na || nb)) || ((cond & 2) && eq) || ((cond & 4) && lt)) cpu.fcr31 |= 1u << 23;
+        else cpu.fcr31 &= ~(1u << 23);
         return;
       }
-      switch (fn) {
-        case 0: case 1: case 2: case 3: {
-          if (fp_in2(f64_class(a), f64_class(b), &nan)) return;
-          int inexact = 0, divz = 0, tiny = 0;
-          int afin = (f64_bits(a) & 0x7FF0000000000000ull) != 0x7FF0000000000000ull, bfin = (f64_bits(b) & 0x7FF0000000000000ull) != 0x7FF0000000000000ull;
-          if (fn == 0 || fn == 1) {
-            double db = fn == 1 ? -b : b;
-            r = a + db;
-            double bb = r - a, err = (a - (r - bb)) + (db - bb);
-            inexact = err != 0;
-          } else if (fn == 2) {
-            double p, e; two_prod(a, b, &p, &e); r = p;
-            inexact = afin && bfin && e != 0; tiny = r == 0 && a != 0 && b != 0;
-          } else {
-            r = a / b;
-            divz = b == 0 && a != 0 && afin;
-            if (!divz && afin && bfin && r == r) { double p, e; two_prod(r, b, &p, &e); inexact = ((a - p) - e) != 0; }
-            tiny = r == 0 && a != 0 && bfin;
-          }
-          if (fp_finish_d(&r, nan, divz, inexact, tiny, afin && bfin)) return;
-          DST_D(fd, r); return;
-        }
-        case 4: {
-          if (fp_in1(f64_class(a), &nan)) return;
-          r = f_sqrt(a);
-          int inexact = 0;
-          if (r == r && (f64_bits(a) & 0x7FF0000000000000ull) != 0x7FF0000000000000ull) { double p, e; two_prod(r, r, &p, &e); inexact = ((a - p) - e) != 0; }
-          if (fp_finish_d(&r, nan, 0, inexact, 0, (f64_bits(a) & 0x7FF0000000000000ull) != 0x7FF0000000000000ull)) return;
-          DST_D(fd, r); return;
-        }
-        case 5: case 7:
-          if (fp_in1(f64_class(a), &nan)) return;
-          r = fn == 5 ? __builtin_fabs(a) : -a;
-          if (fp_finish_d(&r, nan, 0, 0, 0, (f64_bits(a) & 0x7FF0000000000000ull) != 0x7FF0000000000000ull)) return;
-          DST_D(fd, r); return;
-        case 8: case 9: case 10: case 11: case 37: { s64 v; if (fp_conv_l(a, f64_class(a), fn == 37 ? cpu.fcr31 : fn, &v)) return; DST_L(fd, v); return; }
-        case 12: case 13: case 14: case 15: case 36: { s32 v; if (fp_conv_w(a, f64_class(a), fn == 36 ? cpu.fcr31 : fn, &v)) return; DST_W(fd, v); return; }
-        case 32: {
-          if (fp_in1(f64_class(a), &nan)) return;
-          float f = (float)a;
-          if (fp_finish_s(&f, nan, 0, (double)f != a, f == 0 && a != 0, (f64_bits(a) & 0x7FF0000000000000ull) != 0x7FF0000000000000ull)) return;
-          DST_S(fd, f); return;
-        }
+      float32_t sa = { (u32)a }, sb = { (u32)b };
+      float64_t da = { a }, db = { b };
+      if ((fn >= 8 && fn <= 15) || fn == 36 || fn == 37) {
+        // Integer conversion overflow/NaN/infinity uses E, not IEEE invalid.
+        u64 exp = single ? a & 0x7F800000ull : a & 0x7FF0000000000000ull;
+        if (ca || exp == (single ? 0x7F800000ull : 0x7FF0000000000000ull)) FPE_UNIMPL();
+        u32 mode = fp_mode(fn >= 36 ? cpu.fcr31 : fn);
+        int wide = fn <= 11 || fn == 37;
+        s64 v = wide ? (single ? f32_to_i64(sa, mode, true) : f64_to_i64(da, mode, true))
+                     : (single ? f32_to_i32(sa, mode, true) : f64_to_i32(da, mode, true));
+        if ((softfloat_exceptionFlags & softfloat_flag_invalid) || (wide && (v < -9007199254740992ll || v >= 9007199254740992ll))) FPE_UNIMPL();
+        if (fp_flags()) return;
+        if (wide) DST_L(fd, v); else DST_W(fd, v);
+        return;
+      }
+      int nan = 0;
+      if (fp_inputs(ca, fn <= 3 ? cb : 0, &nan)) return;
+      u64 r;
+      int result_single = single;
+      if (nan) r = single ? 0x7FBFFFFFull : 0x7FF7FFFFFFFFFFFFull;
+      else switch (fn) {
+        case 0: r = single ? f32_add(sa, sb).v : f64_add(da, db).v; break;
+        case 1: r = single ? f32_sub(sa, sb).v : f64_sub(da, db).v; break;
+        case 2: r = single ? f32_mul(sa, sb).v : f64_mul(da, db).v; break;
+        case 3: r = single ? f32_div(sa, sb).v : f64_div(da, db).v; break;
+        case 4: r = single ? f32_sqrt(sa).v : f64_sqrt(da).v; break;
+        case 5: r = a & (single ? 0x7FFFFFFFull : 0x7FFFFFFFFFFFFFFFull); break;
+        case 7: r = a ^ (single ? 0x80000000ull : 0x8000000000000000ull); break;
+        case 32: if (single) FPE_UNIMPL(); r = f64_to_f32(da).v; result_single = 1; break;
+        case 33: if (!single) FPE_UNIMPL(); r = f32_to_f64(sa).v; result_single = 0; break;
         default: FPE_UNIMPL();
       }
-    }
-    case 20: {                                                         // W
-      s32 a = SRC_W(fs);
-      cpu.fcr31 &= ~0x3F000u;
-      if (fn == 32) { float f = (float)a; if ((s64)f != (s64)a && fpe_set(FE_I)) { cpu_exception(EXC_FPE, 0); return; } DST_S(fd, f); }
-      else if (fn == 33) DST_D(fd, (double)a);
-      else FPE_UNIMPL();
+      // Conversion of an accepted signaling NaN still changes the destination format.
+      if (nan && fn == 32 && !single) { r = 0x7FBFFFFFull; result_single = 1; }
+      else if (nan && fn == 33 && single) { r = 0x7FF7FFFFFFFFFFFFull; result_single = 0; }
+      else if (nan && !((fn <= 7 && fn != 6) || (fn == 32 && !single) || (fn == 33 && single))) FPE_UNIMPL();
+      if (fp_result(&r, result_single)) return;
+      cpu.f[fd].u = r;
       return;
     }
-    case 21: {                                                         // L
-      s64 a = SRC_L(fs);
-      cpu.fcr31 &= ~0x3F000u;
+    case 20: case 21: {
+      fp_begin();
       if (fn != 32 && fn != 33) FPE_UNIMPL();
-      if (a >= (s64)0x0080000000000000ll || a < (s64)0xFF80000000000000ull) FPE_UNIMPL();
-      if (fn == 32) { float f = (float)a; if ((s64)f != a && fpe_set(FE_I)) { cpu_exception(EXC_FPE, 0); return; } DST_S(fd, f); }
-      else { double d = (double)a; if ((s64)d != a && fpe_set(FE_I)) { cpu_exception(EXC_FPE, 0); return; } DST_D(fd, d); }
+      s64 a = rs == 20 ? SRC_W(fs) : SRC_L(fs);
+      if (rs == 21 && (a >= 36028797018963968ll || a < -36028797018963968ll)) FPE_UNIMPL();
+      u64 r = fn == 32 ? (rs == 20 ? i32_to_f32((s32)a).v : i64_to_f32(a).v)
+                       : (rs == 20 ? i32_to_f64((s32)a).v : i64_to_f64(a).v);
+      if (fp_result(&r, fn == 32)) return;
+      cpu.f[fd].u = r;
       return;
     }
-    default: return;
+    default: fp_begin(); FPE_UNIMPL();
   }
 }
 

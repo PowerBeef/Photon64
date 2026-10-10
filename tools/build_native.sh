@@ -27,6 +27,7 @@ fi
 [ "$(git -C "$REF" rev-parse HEAD)" = "$ANGRYLION_COMMIT" ] || { echo "error: reference revision differs from tools/versions.env" >&2; exit 1; }
 # n64video.c #includes its own rdp/vi modules, and parallel_* is stubbed in
 # tools/oracle.c, so only n64video.c itself is compiled. -DNOISE_ZERO zeroes our
-# noise sources; Angrylion's own sequence is deterministic (fixed seed).
-$CC $CFLAGS -DNOISE_ZERO -o out/oracle_nn tools/oracle.c "$REF/src/core/n64video.c" -I"$REF/src/core" $LDFLAGS -lm
+# noise sources on both sides. The explicit adapter leaves the pinned checkout intact.
+python3 tools/prepare_reference.py "$REF" out/reference-zero.c
+$CC $CFLAGS -DNOISE_ZERO -o out/oracle_nn tools/oracle.c out/reference-zero.c -I"$REF/src/core" $LDFLAGS -lm
 ls -la out/oracle_nn

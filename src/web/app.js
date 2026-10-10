@@ -576,7 +576,11 @@ addEventListener('keydown', e => {
   if (Object.values(k).includes(e.code)) { keysDown.add(e.code); e.preventDefault(); audioStart(); }
 });
 addEventListener('keyup', e => { keysDown.delete(e.code); if (e.code === settings.keys.FF) { fastForward = false; if (!ffLock) audioReset(); } });
-addEventListener('blur', () => { keysDown.clear(); fastForward = false; });
+function releaseInput() {
+  keysDown.clear(); fastForward = false; pointers.clear(); stickPid = null; touchUpdate();
+  if (ex) ex.n64_input(0, 0, 0, 0);
+}
+addEventListener('blur', releaseInput);
 
 // ---- touch pad layout ----
 // Nothing about the pad is fixed in CSS: every control is placed here from the real viewport and its safe area, in one unit u
@@ -834,6 +838,7 @@ const perf = { frames: 0, emu: 0, t0: 0, fps: 0, ms: 0, peak: 0, stalls: 0, slow
 // One field. Returns false if it could not be finished yet: the game is about to look at something the GPU drew,
 // so the core has stopped until those results have been copied back (see N64Gpu.syncNow).
 function emulate(drawLast, dropAudio) {
+  try {
   readInput();
   const t = performance.now();
   if (ex.n64_frame()) {
@@ -850,6 +855,7 @@ function emulate(drawLast, dropAudio) {
   }
   finishField(drawLast, dropAudio, t);
   return true;
+  } catch (error) { rendererFailure(error); return false; }
 }
 function finishField(drawLast, dropAudio, t) {
   if (useGpu) gpu.present(drawLast);
@@ -867,7 +873,7 @@ function drawSoftware() {
 function tick(now) {
   requestAnimationFrame(tick);
   const dt = Math.min(now - rafPrev, 200); rafPrev = now;
-  if (!running || paused || busy) return;
+  if (!running || paused || busy || document.hidden) return;
   // never queue more than a couple of frames ahead of the GPU: a slow GPU slows the game down instead of piling up work
   // (if the browser never reports any completed work at all, the throttle is switched off rather than freezing the game)
   if (useGpu && !bp.off && gpu.pending > 4) {
@@ -1243,10 +1249,10 @@ function initUI() {
   if (self.visualViewport) visualViewport.addEventListener('resize', relayout);
   if (self.ResizeObserver) new ResizeObserver(resize).observe($('screen'));
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { flushSaves(); if (actx && !paused) actx.suspend().catch(() => {}); }
+    if (document.hidden) { releaseInput(); flushSaves(); if (actx && !paused) actx.suspend().catch(() => {}); }
     else { acc = 0; rafPrev = performance.now(); if (actx && !paused && rom) actx.resume().catch(() => {}); if (running) wakeLock(); audioReset(); }
   });
-  addEventListener('pagehide', () => flushSaves());
+  addEventListener('pagehide', () => { releaseInput(); flushSaves(); });
   buildPad(); buildBinds(); updatePills(); initTouch(); renderLibrary(); hostWatch(); dispWatch();
 }
 
@@ -1261,5 +1267,5 @@ function initUI() {
 })();
 // test hook
 window.__photon = { get ex() { return ex; }, get gpu() { return gpu; }, get hi() { return hi; }, get useGpu() { return useGpu; }, loadRom, perf, settings, gpuName, hostSample, hostFit, saveState, loadState, flushSaves, resetGame, openMenu, closeSheet, openSheet, libList,
-  get rom() { return rom; }, get busy() { return busy; }, setPaused: p => { paused = p; }, emulate, touchState, updateXpak,
+  get rom() { return rom; }, get running() { return running; }, get rendererFailed() { return rendererFailed; }, get busy() { return busy; }, setPaused: p => { paused = p; }, emulate, touchState, updateXpak,
   get pad() { return padInfo; }, setInsets: v => { insetOverride = v; resize(); } };

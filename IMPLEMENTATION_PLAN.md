@@ -34,3 +34,11 @@ Source: `ab28c09f4b059239c6467cabbe683701cc86ce4b`, matching the attached 9 Octo
 2. Pin a trusted software FP oracle and establish the report's half-ULP vectors as expected failures in a separate conformance lane. Implement rounding/exception rules with exact bits and flags across native/WASM.
 3. Extend browser tests for durable reload, write failure UI/export, load/home/state permutations, device loss, and allocation failure. Validate at least one physical adapter and mobile browser before claiming support.
 4. Add recorded-input coverage for Smash and World Driver Championship, then profile frame pacing, long tasks, audio underruns, readback costs and memory by scale. Consider workers only after evidence identifies UI-thread stalls.
+
+## Single-pass follow-up
+
+1. Renderer: sign-extend texture coordinates at the shift stage in C/WGSL; use a named, reproducible random-bit adapter and command-granular reference execution. Keep all counted residual color/depth mismatches failing.
+2. FPU: portable SoftFloat f32/f64 arithmetic and conversions, all four guest rounding modes, VR4300 legacy NaN/flush/trap policy. Validate against independently generated Fraction/isqrt vectors in native sanitizer and WASM O0/O3 builds. Hardware certification remains separate.
+3. Browser: stop on synchronous presentation errors, release held keyboard/touch input on focus/page loss, suppress hidden-page fields, reject synchronization/reset on lost devices. Hosted desktop/mobile-emulated fault injection covers quota/unavailable storage and presentation recovery; real Dawn destruction covers the device callback.
+4. Games: add Smash match and World Driver Quick Race scripts; extend every local lane to recorded checkpoints and preserve failures. ROM payloads stay local. A scripted segment is not whole-game compatibility.
+5. Performance: conservative wrapped source/target overlap permits larger software batches; Evaluate VI SIMD candidates against scalar images and timing; retain only demonstrated improvements. Compare fixed artifacts, final machine/image/audio hashes and named profiles; shared-host wall time requires qualification.

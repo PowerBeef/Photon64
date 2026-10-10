@@ -52,7 +52,7 @@ node tools/browsercheck.mjs testroms/RSPCP2VRCP.N64
 node tools/rdp_gpu_probe.mjs "roms/Mario Kart 64 (USA).z64"
 ```
 
-`browsercheck.mjs` checks duplicate state saves, state restoration, IndexedDB battery persistence across reload, cached cartridge loading and page errors. Its independent CI job uses a shipped fixture; never upload commercial cartridges for CI.
+`browsercheck.mjs` checks duplicate state saves, state restoration, IndexedDB battery persistence across reload, cached cartridge loading, quota failures, unavailable storage, invalid ROM replacement, presentation failure/reset, held-input release and page errors. `tools/device_loss.mjs` deliberately destroys a real Dawn device and requires lost barriers/reset to reject. Its independent CI job uses a shipped fixture; never upload commercial cartridges for CI.
 
 The browser lane also checks keyboard/menu pause/resume and records traces, CPU profiles, logs and screenshots for desktop and emulated mobile viewports. Those traces may contain ROM bytes; keep commercial traces local. Use `tools/benchmark.mjs` for sequential fresh-process core+VI timings after recorded-input warmup, with final-state/image/audio agreement. `WASM_SYMBOLS=1 WASM_OUTPUT=out/n64-symbols.wasm ./build_wasm.sh` preserves function names for separate `--profile` replays. Shared-host field timing is not physical-device FPS.
 
@@ -70,11 +70,11 @@ Quote paths with spaces. `tools/games.sh` resolves these names; a root `<short>.
 | `ge` | `roms/GoldenEye 007 (USA).z64` |
 | `pd` | `roms/Perfect Dark (USA) (Rev 1).z64` |
 | `mk64` | `roms/Mario Kart 64 (USA).z64` |
-| Smoke only | `roms/Super Smash Bros. (USA).z64` |
-| Smoke only | `roms/World Driver Championship (USA).z64` |
+| `smash` | `roms/Super Smash Bros. (USA).z64` |
+| `wdc` | `roms/World Driver Championship (USA).z64` |
 
 ## Integrations and next work
 
 Use the GitHub plugin when available to inspect authenticated permissions, refs, code and Actions, and publish authorized source updates. Read generic Actions endpoints for push runs; the commit-workflow convenience tool currently filters to PR runs. Verify responses and remote content; uploading code does not mean CI passed. Use the local shell and committed harnesses for routine work. Do not assume Claude-specific DevTools, Context7, profiling or mobile-build MCP tools exist; discover exposed capabilities. Consult primary documentation when changing WebGPU/WGSL or platform behavior.
 
-Priorities: independent renderer/reference discrepancies, full VR4300 FPU rounding/exception conformance, browser failure/lifecycle coverage, physical devices, and recorded-input coverage for Smash/World Driver. `THIRD_PARTY.md` records provenance; do not bundle the external oracle or claim a verified license chain where it remains unresolved.
+Priorities: independent renderer/reference discrepancies, broader VR4300 FPU hardware conformance beyond the exact-rational corpus, browser failure/lifecycle coverage, physical devices, and recorded-input coverage for Smash/World Driver. `THIRD_PARTY.md` records provenance; do not bundle the external oracle or claim a verified license chain where it remains unresolved.

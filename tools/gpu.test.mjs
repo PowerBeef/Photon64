@@ -49,3 +49,9 @@ test('obsolete synchronization barrier cannot acknowledge a new generation', asy
   const acknowledgements = calls.done; release();
   await assert.rejects(pending, /Obsolete/); assert.equal(calls.done, acknowledgements); assert.equal(calls.apply, 0);
 });
+
+test('lost device never acknowledges an empty synchronization barrier', async () => {
+  const { g, calls } = gpu(); g.lost = true;
+  await assert.rejects(g.syncNow(), /device lost/);
+  assert.equal(calls.done, 0);
+});

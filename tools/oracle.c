@@ -1,5 +1,6 @@
 // Differential test: run every RDP command list through both our renderer and Angrylion (reference
 // software RDP, used here purely as a black-box oracle) and compare the framebuffers at each SYNC_FULL.
+#define RDP_ORACLE
 #define NATIVE_NO_MAIN
 #include <stdint.h>
 static uint8_t alt_rdram[0x800000 + 16] __attribute__((aligned(4096)));
@@ -27,13 +28,20 @@ static u32 last_sync_count;
 static const char *diff_prefix;
 
 static u32 calls, need_resync = 1;
+static u32 reference_commands[1024];
 // Angrylion renders into the machine's real RDRAM (it is the master); our renderer reads the same
-// commands/textures but renders into alt_rdram. No syncing needed.
+// commands/textures but renders into alt_rdram. Resync once after each SYNC_FULL.
 static void hook_pre(void) {
   calls++;
-  // resync at the start of each frame so differences never accumulate and CPU writes are visible to both
+
+}
+
+// Consume one complete command at a time, so future reference writes cannot
+// contaminate textures read earlier by Photon64. Both read the reference-master RDRAM.
+static void hook_command(const u32 *words, u32 count) {
   if (need_resync) { memcpy(alt_rdram, rdram, RDRAM_MAX); need_resync = 0; }
-  a_dp[DP_CURRENT] = sys.dp_current; a_dp[DP_END] = sys.dp_end; a_dp[DP_START] = sys.dp_current; a_dp[DP_STATUS] = sys.dp_status;
+  memcpy(reference_commands, words, count * sizeof *words);
+  a_dp[DP_CURRENT] = a_dp[DP_START] = 0; a_dp[DP_END] = count * 4; a_dp[DP_STATUS] = 1;
   n64video_process_list();
 }
 
@@ -70,7 +78,9 @@ static void compare(void) {
   frame_no++;
 #ifdef RDP_DEBUG
   rdp_dbg_on = frame_no == dbg_frame;
+#ifdef REF_RDP_DEBUG
   { extern int ang_dbg_on, ang_dbg_x, ang_dbg_y, ang_dbg_pix; ang_dbg_on = rdp_dbg_on; ang_dbg_x = rdp_dbg_x; ang_dbg_y = rdp_dbg_y; ang_dbg_pix = rdp_dbg_y * (int)rdp.fb_width + rdp_dbg_x; }
+#endif
 #endif
   need_resync = 1;
 }
@@ -99,11 +109,11 @@ int main(int argc, char **argv) {
   n64video_config_init(&cfg);
   for (int i = 0; i < 8; i++) a_dp_p[i] = &a_dp[i];
   for (int i = 0; i < 14; i++) a_vi_p[i] = &a_vi[i];
-  cfg.gfx.rdram = rdram; cfg.gfx.rdram_size = RDRAM_MAX; cfg.gfx.dmem = spmem;
+  cfg.gfx.rdram = rdram; cfg.gfx.rdram_size = RDRAM_MAX; cfg.gfx.dmem = (u8 *)reference_commands;
   cfg.gfx.vi_reg = a_vi_p; cfg.gfx.dp_reg = a_dp_p; cfg.gfx.mi_intr_reg = &a_mi; cfg.gfx.mi_intr_cb = a_irq;
   cfg.parallel = false; cfg.num_workers = 1;
   n64video_init(&cfg);
-  rdp_hook_pre = hook_pre; rdp_hook_post = hook_post;
+  rdp_hook_pre = hook_pre; rdp_hook_post = hook_post; rdp_hook_command = hook_command; rdp_hook_command_post = hook_post;
   int frames = atoi(argv[2]);
   for (int i = 0; i < frames; i++) { apply_inputs(i); n64_run_frame(); }
   printf("rdp_process calls: %u\n", calls);

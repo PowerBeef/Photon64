@@ -124,3 +124,14 @@ test('actual WASM: A/B loads queue; batteries and cached cartridge identities ag
   e.api.setKeep(false);
   await Promise.all([e.api.resetGame(), e.api.goHome()]); assert.equal(e.api.getRom(), null); assert.equal(e.api.running(), false);
 });
+
+// Exercise the actual presentation function rather than a simulated callback.
+test('synchronous presentation failure stops fields and preserves battery export', () => {
+  const e = environment(); e.api.setRom({ key: 'A' });
+  vm.runInContext(`readInput = () => {}; ex.n64_frame = () => 0; useGpu = true;
+    gpu = { present() { throw new Error('presentation failed'); } };
+    this.presentResult = emulate(true, false);`, e.context);
+  assert.equal(e.context.presentResult, false);
+  assert.equal(e.api.running(), false); assert.equal(e.api.rendererFailed(), true);
+  assert.equal(e.api.battery().length, 0x40800);
+});

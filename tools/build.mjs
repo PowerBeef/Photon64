@@ -29,6 +29,7 @@ ${rd('src/web/art.js')}
 ${rd('src/web/app.js')}
 })();`;
 if (js.includes('</script')) throw new Error('script terminator inside bundle');
-const html = rd('src/web/app.html').replace('<!--@SCRIPT-->', () => `<script>\n${js}\n</script>`);
+const notices = '<!-- SoftFloat 3e license\n' + rd('third_party/softfloat/COPYING.txt').replaceAll('--', '—') + '\n-->\n';
+const html = notices + rd('src/web/app.html').replace('<!--@SCRIPT-->', () => `<script>\n${js}\n</script>`);
 fs.writeFileSync(path.join(root, 'out/photon64.html'), html);
 console.log('out/photon64.html', (html.length / 1024).toFixed(1), 'KB (wasm', (wasm.length / 1024).toFixed(1), 'KB b64)');

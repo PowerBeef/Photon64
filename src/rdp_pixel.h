@@ -199,13 +199,13 @@ static inline void texel_fetch(const u32 *T, const u32 *TM, int kind, s32 s, s32
 }
 
 static inline s32 shift_coord(s32 coord, s32 lo, s32 shift) {
-  coord = clampi(coord, -0x8000, 0x7FFF);
+  coord = (s16)coord;
   if (shift < 11) coord >>= shift;
   else { coord = (s32)((u32)coord << (32 - shift)); coord >>= 16; }
   return coord - (lo << 3);
 }
 static inline s32 clamp_and_shift_coord(int clamp_bit, s32 coord, s32 lo, s32 hi, s32 shift) {
-  coord = clampi(coord, -0x8000, 0x7FFF);
+  coord = (s16)coord;
   if (shift < 11) coord >>= shift;
   else { coord = (s32)((u32)coord << (32 - shift)); coord >>= 16; }
   if (clamp_bit) {
@@ -786,6 +786,9 @@ static inline void shade_and_blend(const s32 *P, const u32 *SP, s32 x, s32 y) {
     if (perspective) perspective_divide(s, t, w, &s, &t);
     const u32 *T0 = TS + (setup_tile & 7) * TILE_WORDS;
     s32 texel0 = sample_texture_copy(T0, TM, s, t, s_offset, tlut);
+#ifdef RDP_DEBUG
+    if (rdp_dbg_on && x == rdp_dbg_x && y == rdp_dbg_y) printf("COPY s=%d t=%d offset=%d texel=%04x tmem0=%08x tmem8=%08x\n", s,t,s_offset,texel0,TM[0],TM[8]);
+#endif
     if ((sflags & RS_ALPHA_TEST) && b_info.fb_size == 2 && (texel0 & 1) == 0) return;
     copy_pipeline((u32)texel0);
     return;

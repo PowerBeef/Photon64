@@ -14,6 +14,7 @@ static void setup(u32 op) {
   RDRAM32(0x1000) = op; cpu.pc = 0x80001000; cpu.npc = cpu.pc + 4;
   cpu.next_ev = cpu.cycles + cpu.cpi;
 }
+#include "fpu_vectors.h"
 #define OP(fn) ((8u << 21) | (9u << 16) | (10u << 11) | (fn))
 EXPORT(run_tests) u32 run_tests(void) {
   checks = failures = first_failure = 0;
@@ -63,6 +64,36 @@ EXPORT(run_tests) u32 run_tests(void) {
     check(cpu.fcr31 == (1u << 9)); check(!(cpu.cp0[C0_STATUS] & ST_EXL));
     check(fmt == 16 ? cpu.f[3].lo == (fn == 7 ? 0xFF800000u : 0x7F800000u) : cpu.f[3].u == (fn == 7 ? 0xFFF0000000000000ull : 0x7FF0000000000000ull));
   }
+  // Exact-rational corpus exercises all four rounding modes, flags and traps.
+  for (u32 i = 0; i < sizeof fpu_vectors / sizeof fpu_vectors[0]; i++) {
+    memset(&cpu, 0, sizeof cpu); cpu.fmask = 31;
+    cpu.cp0[C0_STATUS] = ST_CU1 | ST_FR; cpu.pc = 0x80001004; cpu.npc = cpu.pc + 4;
+    cpu.f[2].u = fpu_vectors[i].a; cpu.f[1].u = fpu_vectors[i].b;
+    cpu.f[3].u = 0x123456789ABCDEF0ull; cpu.fcr31 = fpu_vectors[i].control;
+    cop1_exec((17u << 26) | (fpu_vectors[i].fmt << 21) | (1u << 16) | (2u << 11) | (3u << 6) | fpu_vectors[i].fn);
+#ifndef __wasm__
+    if ((cpu.f[3].u != fpu_vectors[i].result || cpu.fcr31 != fpu_vectors[i].fcr) && failures < 10)
+      printf("FPU vector %u: result=%llx expected=%llx fcr=%x expected=%x\n", i, (unsigned long long)cpu.f[3].u, (unsigned long long)fpu_vectors[i].result, cpu.fcr31, fpu_vectors[i].fcr);
+#endif
+    check(cpu.f[3].u == fpu_vectors[i].result);
+    check(cpu.fcr31 == fpu_vectors[i].fcr);
+    check(!!(cpu.cp0[C0_STATUS] & ST_EXL) == fpu_vectors[i].trap);
+  }
+  memset(&cpu, 0, sizeof cpu); memset(&rsp, 0, sizeof rsp);
+  sys.sp_status = 0; cpu.cycles = rsp.sync = 100; cpu.ev[EV_RSP] = EV_NEVER;
+  gpu_sync_request = 0; check(rsp_sync() == 0); check(cpu.ev[EV_RSP] == 100 + SLICE);
+  sys.sp_status = SP_HALT;
+  check(ram_ranges_overlap(RDRAM_MAX - 4, 8, 0, 4));
+  check(ram_ranges_overlap(0, 4, RDRAM_MAX - 4, 8));
+  check(!ram_ranges_overlap(16, 8, 24, 8));
+  check(ram_ranges_overlap(16, 8, 23, 8));
+  check(ram_ranges_overlap(0, RDRAM_MAX, 32, 1));
+  check(!ram_ranges_overlap(0, 0, 0, 4));
+  check(normalize_dzpix(1) == 3);
+  check(shift_coord(0x10000, 0, 0) == 0);
+  check(shift_coord(0xFFFF, 0, 0) == -1);
+  check(shift_coord(0x8000, 0, 0) == -32768);
+  check(shift_coord(0x8000, 0, 15) == 0);
   TriSetup edge = { .dxhdy = 67108863, .dxmdy = 67108863, .dxldy = 67108863, .yl = 1024, .ym = 32 };
   u32 out[8]; span_setup(&edge, 10, out); check(1); // UBSan guards widened edge intermediates.
   return failures;

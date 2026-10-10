@@ -1,5 +1,6 @@
 // Unity build of the emulator core.
 #include "core.h"
+#include "../third_party/softfloat/photon.c"
 #include "cpu.c"
 #include "bus.c"
 #include "rsp.c"

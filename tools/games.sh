@@ -1,13 +1,13 @@
 #!/bin/bash
 # Game regression suite. Each game is played from power-on with a recorded input script, three ways:
-#   1. software renderer vs. the Angrylion reference, command list by command list (noise sources zeroed on both sides);
+#   1. software renderer vs. the Angrylion reference, command list by command list (random bits zeroed on both sides);
 #   2. WebGPU renderer (Dawn) vs. the software renderer: picture, framebuffer memory and machine state at checkpoints;
 #   3. the same through the high-resolution code path at 1x, which must also be exact.
 #   4. (mk64) the high-resolution pass at 4x: pictures built from texture tiles must show no joints (tools/hdseams.py).
-# ROMs resolve from roms/ by short name; a <short>.z64 file next to this directory's parent overrides the library copy.
+# ROMs resolve from roms/ by short name; a <short>.z64 file next to this directory's parent overrides the local ROM copy.
 # GPU steps use Dawn Node bindings when present, else headless Chromium (gputest.mjs).
-#   tools/games.sh [sm64|ge|pd|mk64 ...]
-#   tools/games.sh --check-roms [sm64|ge|pd|mk64 ...]   # report resolved ROM paths only
+#   tools/games.sh [sm64|ge|pd|mk64|smash|wdc ...]
+#   tools/games.sh --check-roms [sm64|ge|pd|mk64|smash|wdc ...]   # report resolved ROM paths only
 #   GPU_RUNNER=dawn|browser forces one; DAWN_WEBGPU points at the bindings.
 cd "$(dirname "$0")/.." || exit 1
 set -uo pipefail
@@ -21,12 +21,14 @@ fi
 runner=dawntest.mjs; [ "$GPU_RUNNER" = browser ] && runner=gputest.mjs
 PY=${PY:-python3}
 [ -x .venv/bin/python ] && PY=.venv/bin/python   # project venv first (Pillow/scipy live there)
-frames_for() { case $1 in sm64) echo 4200;; ge) echo 4600;; pd) echo 6500;; mk64) echo 3300;; esac; }
+frames_for() { case $1 in sm64) echo 4200;; ge) echo 4600;; pd) echo 6500;; mk64) echo 3300;; smash) echo 8000;; wdc) echo 14000;; esac; }
 checks_for() { case $1 in
   sm64) echo "250,900,2000,2600,3780,4190";;
   ge) echo "700,1300,2500,2900,3450,4000,4599";;
   pd) echo "700,1400,2650,3500,4800,5140,5400,5700,6100,6499";;
-  mk64) echo "500,700,1300,1700,2100,2500,2800,3299";; esac; }
+  mk64) echo "500,700,1300,1700,2100,2500,2800,3299";;
+  smash) echo "300,6000,6151,6755,7114,7999";;
+  wdc) echo "300,6000,7418,7906,10441,13999";; esac; }
 rom_for() {  # short name -> usable path; a root copy wins over roms/
   if [ -f "$1.z64" ]; then echo "$1.z64"; return 0; fi
   case $1 in
@@ -34,19 +36,21 @@ rom_for() {  # short name -> usable path; a root copy wins over roms/
     ge) r="GoldenEye 007 (USA).z64";;
     pd) r="Perfect Dark (USA) (Rev 1).z64";;
     mk64) r="Mario Kart 64 (USA).z64";;
+    smash) r="Super Smash Bros. (USA).z64";;
+    wdc) r="World Driver Championship (USA).z64";;
     *) return 1;;
   esac
   [ -f "roms/$r" ] && echo "roms/$r"
 }
 if [ "${1:-}" = --check-roms ]; then
   shift; fail=0
-  for g in ${@:-sm64 ge pd mk64}; do
+  for g in ${@:-sm64 ge pd mk64 smash wdc}; do
     if rom=$(rom_for "$g"); then echo "$g: $rom"; else echo "$g: ROM not present"; fail=1; fi
   done
   exit $fail
 fi
 fail=0
-for g in ${@:-sm64 ge pd mk64}; do
+for g in ${@:-sm64 ge pd mk64 smash wdc}; do
   rom=$(rom_for "$g") || { echo "$g: ROM not present, required lane failed"; fail=1; continue; }
   I=$(cat tools/inputs/$g.txt); n=$(frames_for $g)
   echo "== $g: software renderer vs. reference"

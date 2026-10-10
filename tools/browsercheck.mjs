@@ -62,6 +62,74 @@ try {
   assert.equal(await page.evaluate(() => new Uint8Array(window.__photon.ex.memory.buffer)[window.__photon.hi[12]]), 0x5A);
   assert.equal(await page.evaluate(() => window.__photon.loadState(1)), true);
   report.checks.push('duplicate state saves', 'state restoration', 'durable battery reload', 'cached cartridge loading');
+  // Real browser transaction failure, dirty retention and recovery. Override the
+  // platform API only for this transaction; the production storage path runs unchanged.
+  assert.equal(await page.evaluate(async () => {
+    const p = window.__photon; p.setPaused(true);
+    const dirty = new Uint32Array(p.ex.memory.buffer, p.hi[16], 1); dirty[0] = 17;
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function () { throw new DOMException('Injected quota failure', 'QuotaExceededError'); };
+    try { return (await p.flushSaves()) === false && dirty[0] === 17; }
+    finally { IDBObjectStore.prototype.put = original; }
+  }), true);
+  assert.equal(await page.evaluate(() => window.__photon.flushSaves()), true);
+  assert.equal(await page.evaluate(() => new Uint32Array(window.__photon.ex.memory.buffer, window.__photon.hi[16], 1)[0]), 0);
+  report.checks.push('quota failure retains dirty progress; retry commits');
+  // Invalid candidates cannot replace the active cartridge.
+  assert.equal(await page.evaluate(async () => {
+    const p = window.__photon, original = p.rom;
+    try { await p.loadRom(new Uint8Array(32), 'invalid.z64'); return false; }
+    catch { return p.rom === original && p.running; }
+  }), true);
+  report.checks.push('invalid cartridge preserves active session');
+  // A synchronous presentation failure used to escape the frame loop. It now
+  // stops emulation, leaves export/reset available and recovers after reset.
+  await page.evaluate(() => {
+    const original = CanvasRenderingContext2D.prototype.putImageData;
+    window.restorePresentation = () => { CanvasRenderingContext2D.prototype.putImageData = original; };
+    CanvasRenderingContext2D.prototype.putImageData = function () { throw new Error('Injected presentation failure'); };
+    window.__photon.setPaused(false);
+  });
+  await page.waitForFunction(() => window.__photon.rendererFailed && !window.__photon.running);
+  const failedField = await field(); await page.waitForTimeout(200);
+  assert.equal(await field(), failedField);
+  assert.match(await page.locator('#toast').textContent(), /Renderer synchronization failed/);
+  await page.evaluate(() => { window.restorePresentation(); return window.__photon.resetGame(); });
+  await page.waitForFunction(() => !window.__photon.rendererFailed && window.__photon.running);
+  report.checks.push('presentation failure stops fields; reset recovers');
+  // Held keyboard and touch inputs must be released when focus is lost.
+  await page.keyboard.down('KeyX');
+  if (mobile) {
+    const button = page.locator('#touch .t[data-b=A]');
+    const box = await button.boundingBox();
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 7 }] });
+    assert.ok(await page.evaluate(() => window.__photon.touchState.buttons & 0x8000));
+  }
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  assert.deepEqual(await page.evaluate(() => ({ ...window.__photon.touchState })), { buttons: 0, x: 0, y: 0 });
+  if (mobile) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.keyboard.up('KeyX');
+  report.checks.push('focus loss releases held inputs');
+  const temporary = await browser.newContext();
+  await temporary.addInitScript(() => { indexedDB.open = () => { throw new DOMException('Injected unavailable storage', 'SecurityError'); }; });
+  const temporaryPage = await temporary.newPage();
+  temporaryPage.on('pageerror', e => errors.push(e.message));
+  await temporaryPage.goto(`http://127.0.0.1:${server.address().port}`);
+  await temporaryPage.waitForFunction(() => window.__photon?.ex);
+  await temporaryPage.evaluate(() => window.__photon.settings.renderer = 'sw');
+  await temporaryPage.setInputFiles('#file', rom);
+  await temporaryPage.waitForFunction(() => !!window.__photon.rom);
+  assert.equal(await temporaryPage.evaluate(async () => {
+    const p = window.__photon; p.setPaused(true);
+    const dirty = new Uint32Array(p.ex.memory.buffer, p.hi[16], 1); dirty[0] = 19;
+    return await p.flushSaves() && dirty[0] === 19 && await p.saveState(0, '');
+  }), true);
+  assert.match(await temporaryPage.locator('#toast').textContent(), /temporarily/i);
+  await temporaryPage.screenshot({ path: path.join(evidence, 'temporary-storage.png') });
+  await temporaryPage.reload(); await temporaryPage.waitForFunction(() => window.__photon?.ex);
+  assert.equal(await temporaryPage.locator('#lib .cart').count(), 0);
+  await temporary.close();
+  report.checks.push('unavailable storage stays dirty, labels temporary states, and disappears after reload');
   assert.deepEqual(errors, []);
   report.outcome = 'PASS';
   console.log('PASS browser:', JSON.stringify(report));

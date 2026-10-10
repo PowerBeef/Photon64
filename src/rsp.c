@@ -180,6 +180,9 @@ u32 rsp_sync(void) {
   if (sys.sp_status & SP_HALT) return 0;
   if (unlikely(gpu_sync_request)) { cpu_restart = 1; return 0; }
   u64 now = cpu.cycles;
+  // A CPU MMIO access may already have synchronized this exact cycle before
+  // the dispatcher consumes EV_RSP. Keep a running RSP scheduled on early returns.
+  if (cpu.ev[EV_RSP] == EV_NEVER) ev_set(EV_RSP, now + SLICE);
   if (now <= rsp.sync) return 0;
   s64 n = (s64)(now - rsp.sync) * 2 / 3;
   if (n <= 0) return 0;

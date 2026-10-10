@@ -1,0 +1,21 @@
+// Real Dawn device destruction: an injected loss, not a physical hardware failure.
+import fs from 'node:fs';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+import { create, globals } from 'webgpu';
+const native = create([]);
+const context = vm.createContext({ ...globals, console, navigator: { gpu: native }, performance, Uint8Array, Uint32Array, Float32Array, ArrayBuffer, DataView, WebAssembly, Map, Set, Promise, Error, Math });
+vm.runInContext(fs.readFileSync('src/web/gpu.js', 'utf8') + '\nthis.N64Gpu=N64Gpu;', context);
+const ex = new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync('out/n64.wasm')), { env: { host_log() {}, host_gpu_flush() {} } }).exports;
+const shaders = { allowFallback: true };
+for (const name of ['rdp', 'vi', 'merge']) shaders[name] = fs.readFileSync(`src/web/${name}.wgsl`, 'utf8');
+const g = await context.N64Gpu.create({ ex }, null, shaders);
+assert.ok(g, 'adapter required');
+const lost = new Promise(resolve => { g.onLost = resolve; });
+g.device.destroy();
+const info = await Promise.race([lost, new Promise((_, reject) => setTimeout(() => reject(new Error('loss callback timed out')), 5000))]);
+assert.equal(info.reason, 'destroyed'); assert.equal(g.lost, true);
+await assert.rejects(g.syncNow(), /lost/i);
+assert.throws(() => g.reset(), /lost/i);
+console.log(JSON.stringify({ outcome: 'PASS', check: 'destroyed Dawn device reports loss and rejects synchronization', reason: info.reason, adapter: g.adapter.info }));
+process.exit(0);

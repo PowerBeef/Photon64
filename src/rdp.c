@@ -284,6 +284,7 @@ static u32 comb_const(int cyc, int slot) {
 static int normalize_dzpix(int dz) {
   if (dz >= 0x8000) return 0x8000;
   if (dz == 0) return 1;
+  if (dz == 1) return 3;
   int bit = 31 - __builtin_clz(dz);
   return 1 << (bit + 1);
 }
@@ -474,9 +475,45 @@ static void load_tlut(Tile *t, u32 slo, u32 shi, u32 tlo) {
   }
 }
 
+// Texture fetches can wrap at RAM end; split both circular intervals before comparing.
+static int ram_ranges_overlap(u32 a, u32 an, u32 b, u32 bn) {
+  if (!an || !bn) return 0;
+  if (an >= RDRAM_MAX || bn >= RDRAM_MAX) return 1;
+  a &= RDRAM_MAX - 1; b &= RDRAM_MAX - 1;
+  u32 a0 = an < RDRAM_MAX - a ? an : RDRAM_MAX - a;
+  u32 b0 = bn < RDRAM_MAX - b ? bn : RDRAM_MAX - b;
+  return (a < b + b0 && b < a + a0) ||
+         (an > a0 && b < an - a0) || (bn > b0 && a < bn - b0) ||
+         (an > a0 && bn > b0);
+}
+static int batch_reads_pending(u32 src, u32 bytes) {
+  if (!b_info.num_prims) return 0;
+  // Rare small framebuffer formats and uncertain dimensions retain the safe full flush.
+  if (b_info.fb_fmt < FB_5551 || !rdp.deduced_height) return 1;
+  u32 pixels = b_info.fb_width * rdp.deduced_height;
+  u32 size = b_info.fb_fmt == FB_8888 ? 4 : 2;
+  u32 color = b_info.fb_addr * size;
+  return ram_ranges_overlap(src, bytes, color, pixels * size) ||
+    (!b_info.alias && (b_info.z_use & 2) && ram_ranges_overlap(src, bytes, b_info.depth_addr * 2, pixels * 2));
+}
+
 static void rdp_load(u32 tile_i, u32 slo, u32 tlo, u32 shi, u32 thi, int mode) {
   Tile *t = &rdp.tiles[tile_i];
-  if (!rdp_gpu_mode) rdp_flush();   // textures may be sourced from memory the pending primitives render to
+  if (!rdp_gpu_mode) {
+    u32 vsize = rdp.ti_size;
+    if (vsize) {
+      u32 vbytes = 1u << (vsize - 1), src, bytes;
+      if (mode == LOAD_BLOCK) {
+        src = rdp.ti_addr + (rdp.ti_width * tlo + slo) * vbytes;
+        bytes = ((((shi - slo + 1) & 0xFFF) * vbytes + 7) >> 3) * 8;
+      } else {
+        src = rdp.ti_addr + (rdp.ti_width * (tlo >> 2) + (slo >> 2)) * vbytes;
+        bytes = mode == LOAD_TLUT ? 0x1000 : (thi >> 2) >= (tlo >> 2) ?
+          ((thi >> 2) - (tlo >> 2)) * rdp.ti_width * vbytes + ((((((shi >> 2) - (slo >> 2) + 1) & 0xFFF) * vbytes + 7) >> 3) * 8) : 0;
+      }
+      if (batch_reads_pending(src, bytes)) rdp_flush();
+    }
+  }
   t->slo = slo; t->shi = shi; t->tlo = tlo; t->thi = thi;
   rdp.tiles_dirty = 1; rdp.tmem_dirty = 1;
   u32 vsize = rdp.ti_size, tsize = t->size;
@@ -722,6 +759,10 @@ static void rdp_exec(const u32 *w) {
 }
 
 void (*rdp_hook_pre)(void), (*rdp_hook_post)(void);
+#ifdef RDP_ORACLE
+void (*rdp_hook_command)(const u32 *, u32);
+void (*rdp_hook_command_post)(void);
+#endif
 // GPU mode: does this texture load read memory whose current contents exist only on the GPU? If so the pending
 // primitives are sent off, the host is asked to copy the results back, and command processing stops in front of
 // the load until that has happened (rdp_resume).
@@ -747,13 +788,7 @@ static int load_blocked(const u32 *w, u32 cmd) {
   }
   src &= RDRAM_MAX - 1;
   if (!len) return 0;
-  // primitives still waiting in the batch may draw into the source
-  if (b_info.num_prims && b_info.fb_fmt >= FB_5551) {
-    u32 px = b_info.fb_width * rdp.deduced_height;
-    u32 ca = b_info.fb_fmt == FB_8888 ? b_info.fb_addr << 2 : b_info.fb_addr << 1, cl = b_info.fb_fmt == FB_8888 ? px << 2 : px << 1;
-    u32 za = b_info.depth_addr << 1, zl = px << 1;
-    if ((src < ca + cl && src + len > ca) || (!b_info.alias && (b_info.z_use & 2) && src < za + zl && src + len > za)) rdp_flush();
-  }
+  if (batch_reads_pending(src, len)) rdp_flush();
   if (!gpu_stale_n || !gpu_range_stale(src, len)) return 0;
   gpu_request_sync(); gpu_sync_cause[0] = 4; gpu_sync_cause[1] = src; gpu_sync_cause[2] = len; gpu_sync_cause[3] = cmd;
   return 1;
@@ -766,7 +801,13 @@ static void rdp_exec_buffered(void) {
     u32 len = rdp_len[cmd] * 2;
     if (pos + len > rdp.cmd_n) break;
     if (rdp_gpu_mode && (cmd == 0x30 || cmd == 0x33 || cmd == 0x34) && load_blocked(rdp.cmd + pos, cmd)) { rdp_paused = 1; break; }
+#ifdef RDP_ORACLE
+    if (rdp_hook_command) rdp_hook_command(rdp.cmd + pos, len);
+#endif
     rdp_exec(rdp.cmd + pos);
+#ifdef RDP_ORACLE
+    if (rdp_hook_command_post) rdp_hook_command_post();
+#endif
     pos += len;
   }
   if (pos) { memmove(rdp.cmd, rdp.cmd + pos, (rdp.cmd_n - pos) * 4); rdp.cmd_n -= pos; }

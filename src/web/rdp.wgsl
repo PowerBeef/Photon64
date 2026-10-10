@@ -263,7 +263,7 @@ fn texel_fetch(T: u32, TM: u32, kind: i32, s: i32, t: i32, lut_offset: u32, addr
 }
 
 fn shift_coord_raw(coord_in: i32, shift: i32) -> i32 {
-  var coord = clamp(coord_in, -0x8000, 0x7FFF);
+  var coord = (coord_in << 16u) >> 16u;
   if (shift < 11) { coord = coord >> u32(shift); }
   else { coord = (coord << u32(32 - shift)) >> 16u; }
   return coord;

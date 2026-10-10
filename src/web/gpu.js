@@ -141,7 +141,7 @@ class N64Gpu {
     this.viU = new ArrayBuffer(144); this.viU32 = new Uint32Array(this.viU); this.viF32 = new Float32Array(this.viU);
     this.stats = { batches: 0, uploads: 0, merges: 0, readbacks: 0, syncs: 0, waits: 0, late: 0 };
     this.lost = false; this.pending = 0; this.done = 0;
-    device.lost.then(info => { this.lost = true; if (this.onLost) this.onLost(info); });
+    device.lost.then(info => { this.lost = true; this.readbackError = new Error('GPU device lost: ' + (info.message || info.reason)); if (this.onLost) this.onLost(info); });
     // (nothing here switches the core to GPU rendering: the owner calls reset() when it wants that)
   }
 
@@ -204,6 +204,7 @@ class N64Gpu {
 
   // (re)start GPU rendering: GPU memory becomes an exact copy of emulated RDRAM (data + hidden bits)
   reset() {
+    if (this.lost) throw this.readbackError || new Error('GPU device lost');
     this.generation = (this.generation || 0) + 1;
     for (const j of this.inflight) j.dead = true;
     this.readbackError = null; this.tail = Promise.resolve();
@@ -414,6 +415,7 @@ class N64Gpu {
   // Bring emulated RDRAM fully up to date with the GPU: called when the core stops because the game is about to
   // look at something the GPU drew (n64_frame() returned 1), before save states and when leaving GPU mode.
   async syncNow() {
+    if (this.lost) throw this.readbackError || new Error('GPU device lost');
     const generation = this.generation;
     if (this.readbackError) throw this.readbackError;
     // waits: the copy-back was not there yet; late: it had not even been started (the guess at picture completion missed)
