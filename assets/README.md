@@ -1,23 +1,26 @@
 # Photon64 identity
 
-A cyan light-beam **P** and custom geometric **PHOTON64** lettering replace the
-four-color aperture and monoline wordmark. The lettering is drawn as filled
+A four-color light-beam **P** pairs with custom geometric **PHOTON64** lettering.
+The accepted symbol and lettering retain their original geometry, recolored to
+match the emulator UI: green, blue, red and yellow. The lettering is drawn as filled
 paths, including its counters and optical spacing. It is a custom wordmark,
 not a general-purpose alphabet or an installable font.
 
 | Asset | Use | Bytes |
 |---|---|---:|
-| [logo-mark.svg](logo-mark.svg) | Cyan symbol, transparent background | 1,298 |
+| [logo-mark.svg](logo-mark.svg) | Four-color symbol, transparent background | 1,577 |
 | [logo-mark-mono.svg](logo-mark-mono.svg) | Single-color symbol using `currentColor` | 1,303 |
-| [logo.svg](logo.svg) | Full lockup for light backgrounds | 5,767 |
-| [logo-on-dark.svg](logo-on-dark.svg) | Full lockup for dark backgrounds | 5,783 |
+| [logo.svg](logo.svg) | Full lockup for light backgrounds | 6,073 |
+| [logo-on-dark.svg](logo-on-dark.svg) | Full lockup for dark backgrounds | 6,089 |
 | [wordmark.svg](wordmark.svg) | Lettering alone for light backgrounds | 4,659 |
 | [wordmark-on-dark.svg](wordmark-on-dark.svg) | Lettering alone for dark backgrounds | 4,675 |
-| [banner.svg](banner.svg) | Project README header | 6,165 |
+| [banner.svg](banner.svg) | Project README header | 6,471 |
 
 Every logo is a real vector: no embedded bitmap, font, script, external URL or
 filter. Logo lettering uses `currentColor`; external light variants default to
-black, and dark variants explicitly use `#f3f6fa`. The accent is `#00d9de`.
+black, and dark variants explicitly use `#f3f4f6`. The symbol uses green `#22b35c`, blue `#3b7bff`, red `#ea4335`,
+and yellow `#f6c21c`; “64” is yellow. These match `src/web/app.html` and
+`src/web/art.js`. A small vector pattern colors the P loop; the beam is red.
 The banner's explanatory subtitle uses system sans-serif; the brand name is
 entirely paths. Preserve each `viewBox` and scale uniformly.
 
@@ -32,7 +35,9 @@ for tracing. No font was substituted during conversion.
 Two flat-color masks remove the background and discard isolated raster specks
 below 50 source pixels. Potrace fits cubic Bezier paths and preserves sharp
 corners and letter counters. Colors are normalized to the requested flat fills.
-Rasterizing the resulting SVG at the original 2172×724 resolution gives cyan
+The original cyan master remains the geometry reference; its colors are not
+the shipped palette. Fidelity checks render the original two masks separately
+from the final palette. Rasterizing those SVG masks at the original 2172×724 resolution gives cyan
 silhouette IoU **99.767%** and lettering IoU **99.577%**, with maximum boundary
 distances of **1.414px** and **2px** respectively. These are geometric comparisons
 to the cleaned masks, not a claim of pixel-identical gradients or antialiasing.

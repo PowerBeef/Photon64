@@ -19,7 +19,9 @@ ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / 'assets'
 SOURCE = ASSETS / 'design/photon64-master.png'
 CYAN = '#00d9de'
-LIGHT = '#f3f6fa'
+LIGHT = '#f3f4f6'
+# Match src/web/app.html and src/web/art.js. Keep the source raster unchanged.
+GREEN, BLUE, RED, YELLOW = '#22b35c', '#3b7bff', '#ea4335', '#f6c21c'
 pixels = np.asarray(Image.open(SOURCE).convert('RGB'))
 cyan = (pixels[:, :, 1] > 100) & (pixels[:, :, 2] > 100) & (pixels[:, :, 0] < 100)
 white = pixels.min(axis=2) > 150
@@ -62,27 +64,34 @@ def svg(viewbox, paths, title='Photon64', color=None):
 
 
 cyan_path, white_path = trace(cyan), trace(white)
-paths = f'<path fill="{CYAN}" d="{cyan_path}"/><path fill="currentColor" d="{white_path}"/>'
-viewbox = bounds(cyan | white)
-(ASSETS / 'logo.svg').write_text(svg(viewbox, paths))
-(ASSETS / 'logo-on-dark.svg').write_text(svg(viewbox, paths, color=LIGHT))
+# Keep the original masks for geometric fidelity; palette changes are independent.
+fidelity_paths = f'<path fill="{CYAN}" d="{cyan_path}"/><path fill="currentColor" d="{white_path}"/>'
 mark = cyan.copy()
 mark[:, 500:] = False
 mark_path = trace(mark)
-(ASSETS / 'logo-mark.svg').write_text(svg(bounds(mark), f'<path fill="{CYAN}" d="{mark_path}"/>', 'Photon64 symbol'))
-(ASSETS / 'logo-mark-mono.svg').write_text(svg(bounds(mark), f'<path fill="currentColor" d="{mark_path}"/>', 'Photon64 symbol'))
+loop, beam = ['M' + part for part in mark_path.split('M')[1:]]
+# Flat color fields follow the P loop; its separate light beam is red.
+# User-space coordinates preserve the same colors in every asset/viewBox.
+palette = f'<defs><pattern id="photon64-palette" patternUnits="userSpaceOnUse" width="600" height="600"><path fill="{BLUE}" d="M0 0H600V600H0Z"/><path fill="{GREEN}" d="M0 0H288V364H0Z"/><path fill="{YELLOW}" d="M0 364H600V600H0Z"/></pattern></defs>'
+mark_paths = palette + f'<path fill="url(#photon64-palette)" d="{loop}"/><path fill="{RED}" d="{beam}"/>'
 letters = cyan.copy()
 letters[:, :500] = False
-letter_paths = f'<path fill="{CYAN}" d="{trace(letters)}"/><path fill="currentColor" d="{white_path}"/>'
+letter_paths = f'<path fill="{YELLOW}" d="{trace(letters)}"/><path fill="currentColor" d="{white_path}"/>'
+paths = mark_paths + letter_paths
+viewbox = bounds(cyan | white)
+(ASSETS / 'logo.svg').write_text(svg(viewbox, paths))
+(ASSETS / 'logo-on-dark.svg').write_text(svg(viewbox, paths, color=LIGHT))
+(ASSETS / 'logo-mark.svg').write_text(svg(bounds(mark), mark_paths, 'Photon64 symbol'))
+(ASSETS / 'logo-mark-mono.svg').write_text(svg(bounds(mark), f'<path fill="currentColor" d="{mark_path}"/>', 'Photon64 symbol'))
 (ASSETS / 'wordmark.svg').write_text(svg(bounds(letters | white), letter_paths))
 (ASSETS / 'wordmark-on-dark.svg').write_text(svg(bounds(letters | white), letter_paths, color=LIGHT))
-banner = '<rect width="1280" height="400" rx="24" fill="#0d1117"/>'
+banner = '<rect width="1280" height="400" rx="24" fill="#0e0f13"/>'
 banner += f'<svg x="100" y="70" width="1080" height="210" viewBox="{viewbox}" color="{LIGHT}">{paths}</svg>'
 banner += '<text x="640" y="324" text-anchor="middle" fill="#9ba9bb" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="28" letter-spacing=".4">Nintendo 64. In your browser.</text>'
 (ASSETS / 'banner.svg').write_text(svg('0 0 1280 400', banner, 'Photon64 — Nintendo 64 in your browser'))
 
 # Compare filled silhouettes at the original resolution, separately by color.
-render = svg(f'0 0 {pixels.shape[1]} {pixels.shape[0]}', paths, color=LIGHT)
+render = svg(f'0 0 {pixels.shape[1]} {pixels.shape[0]}', fidelity_paths, color=LIGHT)
 png = cairosvg.svg2png(bytestring=render.encode())
 result = np.asarray(Image.open(io.BytesIO(png)).convert('RGBA'))
 actual_cyan = (result[:, :, 3] >= 128) & (result[:, :, 0] < 100)

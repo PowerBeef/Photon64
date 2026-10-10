@@ -18,3 +18,12 @@ inventing approximate glyphs. Flatten the two requested fills; remove the
 background, accidental tiny specks and raster texture. Keep intended counters,
 the separated diagonal beam, relative letter shapes and original spacing.
 Keep both the source and conversion measurements. Only paths enter the app.
+
+## Emulator palette revision
+
+The user approved the shape and requested the emulator’s original four colors.
+The vector assets retain the traced geometry, with green #22b35c and blue #3b7bff
+across the upper P loop, yellow #f6c21c below, and red #ea4335 on the light beam.
+The 64 is yellow and dark-background PHOTON lettering is #f3f4f6. The source
+raster remains unchanged as the geometric reference. No new image generation
+or font substitution was needed for this palette-only revision.
